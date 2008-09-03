@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import sys
 import os
 import errno
@@ -8,7 +10,7 @@ errlogfifo = '/tmp/errlogfifo'
 accesslogfifo = '/tmp/accesslogfifo'
 auditlogfifo = '/tmp/auditlogfifo'
 
-instdir = "/opt/redhat-ds/slapd-localhost"
+instdir = "/opt/fedora-ds/slapd-localhost"
 maxbufsize = 1000 # set on command line
 errorloglevel = '0' # set on command line
 doaccesslog = False
@@ -160,11 +162,11 @@ def run():
 
 def usage():
     print "%s instancedir numlines errloglevel [accesslog] [auditlog]" % sys.argv[0]
-    print "e.g. %s /opt/redhat-ds/slapd-foo 1000 8192" % sys.argv[0]
+    print "e.g. %s /opt/fedora-ds/slapd-foo 1000 8192" % sys.argv[0]
     print "This will capture the last 1000 lines to the error log with log level 8192"
-    print "     %s /opt/redhat-ds/slapd-foo 1000 8192 1" % sys.argv[0]
+    print "     %s /opt/fedora-ds/slapd-foo 1000 8192 1" % sys.argv[0]
     print "Like above, but also capture the access log output"
-    print "     %s /opt/redhat-ds/slapd-foo 1000 8192 1 1" % sys.argv[0]
+    print "     %s /opt/fedora-ds/slapd-foo 1000 8192 1 1" % sys.argv[0]
     print "Like above, but also capture the audit log output"
     print "When the server exits, the last numlines of each log will be printed to"
     print "     %s.log - error log output" % errlogfifo
