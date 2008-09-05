@@ -107,7 +107,9 @@ if test -n "$needCA" ; then
     certutil -G $prefixarg -d $secdir -z $secdir/noise.txt -f $secdir/pwdfile.txt
 # 6. Generate the self-signed certificate: 
     echo "Creating self-signed CA certificate"
-    certutil -S $prefixarg -n "CA certificate" -s "cn=CAcert" -x -t "CT,," -m 1000 -v 120 -d $secdir -z $secdir/noise.txt -f $secdir/pwdfile.txt
+# note - the basic constraints flag (-2) is required to generate a real CA cert
+# it asks 3 questions that cannot be supplied on the command line
+    ( echo y ; echo ; echo y ) | certutil -S $prefixarg -n "CA certificate" -s "cn=CAcert" -x -t "CT,," -m 1000 -v 120 -d $secdir -z $secdir/noise.txt -f $secdir/pwdfile.txt -2
 # export the CA cert for use with other apps
     echo Exporting the CA certificate to cacert.asc
     certutil -L $prefixarg -d $secdir -n "CA certificate" -a > $secdir/cacert.asc

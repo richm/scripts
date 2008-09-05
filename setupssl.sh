@@ -100,7 +100,9 @@ if test -n "$needCA" ; then
     ../shared/bin/certutil -G -d . -z noise.txt -f pwdfile.txt
 # 6. Generate the self-signed certificate: 
     echo "Creating self-signed CA certificate"
-    ../shared/bin/certutil -S -n "CA certificate" -s "cn=CAcert" -x -t "CT,," -m 1000 -v 120 -d . -z noise.txt -f pwdfile.txt
+# note - the basic constraints flag (-2) is required to generate a real CA cert
+# it asks 3 questions that cannot be supplied on the command line
+    ( echo y ; echo ; echo y ) | ../shared/bin/certutil -S -n "CA certificate" -s "cn=CAcert" -x -t "CT,," -m 1000 -v 120 -d . -z noise.txt -f pwdfile.txt -2
 # export the CA cert for use with other apps
     echo Exporting the CA certificate to cacert.asc
     ../shared/bin/certutil -L -d . -n "CA certificate" -a > cacert.asc
