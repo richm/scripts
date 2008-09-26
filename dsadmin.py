@@ -13,6 +13,7 @@ import cStringIO
 import time
 import operator
 import tempfile
+import pprint
 
 from ldap.ldapobject import SimpleLDAPObject
 
@@ -150,18 +151,26 @@ def wrapper(f,name):
     argument, we extract the raw data from the entry object to pass in."""
     def inner(*args, **kargs):
         if name == 'result':
-            type, data = f(*args, **kargs)
+            objtype, data = f(*args, **kargs)
             # data is either a 2-tuple or a list of 2-tuples
             # print data
             if data:
                 if isinstance(data,tuple):
-                    return type, Entry(data)
+                    return objtype, Entry(data)
                 elif isinstance(data,list):
-                    return type, [Entry(x) for x in data]
+                    # AD sends back these search references
+                    if objtype == ldap.RES_SEARCH_RESULT and \
+                       isinstance(data[-1],tuple) and \
+                       not data[-1][0]:
+                        print "Received search reference: "
+                        pprint.pprint(data[-1][1])
+                        data.pop() # remove the last non-entry element
+                           
+                    return objtype, [Entry(x) for x in data]
                 else:
                     raise TypeError, "unknown data type %s returned by result" % type(data)
             else:
-                return type, data
+                return objtype, data
         elif name.startswith('add'):
             # the first arg is self
             # the second and third arg are the dn and the data to send
