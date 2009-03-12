@@ -14,6 +14,7 @@ import time
 import operator
 import tempfile
 import pprint
+import shutil
 
 from ldap.ldapobject import SimpleLDAPObject
 
@@ -50,7 +51,7 @@ class Entry:
             if isinstance(entrydata,tuple):
                 self.dn = entrydata[0]
                 self.data = ldap.cidict.cidict(entrydata[1])
-            elif isinstance(entrydata,str) or isinstance(entrydata,unicode):
+            elif isinstance(entrydata,basestring):
                 self.dn = entrydata
                 self.data = ldap.cidict.cidict()
         else:
@@ -201,11 +202,11 @@ class LDIFConn(ldif.LDIFParser):
         self.dndict = {} # maps dn to Entry
         self.dnlist = [] # contains entries in order read
         myfile = input_file
-        if isinstance(input_file,str) or isinstance(input_file,unicode):
+        if isinstance(input_file,basestring):
             myfile = open(input_file, "r")
         ldif.LDIFParser.__init__(self,myfile,ignored_attr_types,max_entries,process_url_schemes)
         self.parse()
-        if isinstance(input_file,str) or isinstance(input_file,unicode):
+        if isinstance(input_file,basestring):
             myfile.close()
 
     def handle(self,dn,entry):
@@ -253,14 +254,16 @@ class DSAdmin(SimpleLDAPObject):
                 instdir = ent.getValue('nsslapd-instancedir')
                 if not instdir and self.isLocal:
                     # get instance name from errorlog
-                    self.inst = re.match(r'(.*)[\/]slapd-(\w+)/errors', self.errlog).group(2)
+                    self.inst = re.match(r'(.*)[\/]slapd-([^/]+)/errors', self.errlog).group(2)
                     if self.isLocal and self.confdir:
                         instdir = self.getDseAttr('nsslapd-instancedir')
                     else:
                         instdir = re.match(r'(.*/slapd-.*)/logs/errors', self.errlog).group(1)
                 if not instdir:
                     instdir = self.confdir
-                self.sroot, self.inst = re.match(r'(.*)[\/]slapd-(\w+)$', instdir).groups()
+                print "instdir=", instdir
+                print ent
+                self.sroot, self.inst = re.match(r'(.*)[\/]slapd-([^/]+)$', instdir).groups()
                 ent = self.getEntry('cn=config,cn=ldbm database,cn=plugins,cn=config',
                                     ldap.SCOPE_BASE, '(objectclass=*)',
                                     [ 'nsslapd-directory' ])
@@ -885,7 +888,7 @@ class DSAdmin(SimpleLDAPObject):
 
         binddnlist = []
         if binddn:
-            if isinstance(binddn, str):
+            if isinstance(binddn, basestring):
                 binddnlist.append(binddn)
             else:
                 binddnlist = binddn
@@ -990,6 +993,8 @@ class DSAdmin(SimpleLDAPObject):
         else:
             windomain = '.'.join(ldap.explode_dn(suffix, 1))
         entry.setValues("nsds7WindowsDomain", windomain)
+        if args.has_key('interval'):
+            entry.setValues("winSyncInterval", args['interval'])
 
     # args - DSAdmin consumer (repoth), suffix, binddn, bindpw, timeout
     # also need an auto_init argument
@@ -1019,16 +1024,22 @@ class DSAdmin(SimpleLDAPObject):
         entry.setValues('objectclass', "top", "nsds5replicationagreement")
         entry.setValues('cn', cn)
         entry.setValues('nsds5replicahost', othhost)
-        entry.setValues('nsds5replicaport', str(othport))
         entry.setValues('nsds5replicatimeout', str(args.get('timeout', 120)))
         entry.setValues('nsds5replicabinddn', binddn)
         entry.setValues('nsds5replicacredentials', bindpw)
-        entry.setValues('nsds5replicabindmethod', 'simple')
+        entry.setValues('nsds5replicabindmethod', args.get('bindmethod', 'simple'))
         entry.setValues('nsds5replicaroot', nsuffix)
         entry.setValues('nsds5replicaupdateschedule', '0000-2359 0123456')
         entry.setValues('description', "me to %s%d" % (othhost,othport));
-        if othsslport:
+        if args.has_key('starttls'):
+            entry.setValues('nsds5replicatransportinfo', 'TLS')
+            entry.setValues('nsds5replicaport', str(othport))
+        elif othsslport:
             entry.setValues('nsds5replicatransportinfo', 'SSL')
+            entry.setValues('nsds5replicaport', str(othsslport))
+        else:
+            entry.setValues('nsds5replicatransportinfo', 'LDAP')
+            entry.setValues('nsds5replicaport', str(othport))
         if args.has_key('fractional'):
             entry.setValues('nsDS5ReplicatedAttributeList', args['fractional'])
         if args.has_key('auto_init'):
@@ -1177,11 +1188,14 @@ class DSAdmin(SimpleLDAPObject):
             beents = self.getBackendsForSuffix(repArgs['suffix'], ['cn'])
             # just use first one
             repArgs['bename'] = beents[0].cn
-        if repArgs.has_key('log'):
+        if repArgs.get('log', False):
             self.enableReplLogging()
         if repArgs['type'] != LEAF_TYPE:
             self.setupChangelog()
         self.setupReplBindDN(repArgs.get('binddn'), repArgs.get('bindcn'), repArgs.get('bindpw'))
+        if repArgs.get('bindmethod', 'bogus') == 'SSLCLIENTAUTH':
+            mod = [(ldap.MOD_REPLACE, 'description', 'CN=localhost.localdomain,OU=Fedora Directory Server')]
+            self.modify_s(repArgs.get('binddn'), mod)
         self.setupReplica(repArgs)
         if repArgs.has_key('legacy'):
             self.setupLegacyConsumer(repArgs.get('binddn'), repArgs.get('bindpw'))
@@ -1196,6 +1210,52 @@ class DSAdmin(SimpleLDAPObject):
             for (attr, val) in pwdargs.iteritems():
                 mods.append((ldap.MOD_REPLACE, attr, str(val)))
         self.modify_s(dn, mods)
+
+    def setupSSL(self,secport,sourcedir=None,secargs={}):
+        dn = 'cn=encryption,cn=config'
+        mod = [(ldap.MOD_REPLACE, 'nsSSL3', secargs.get('nsSSL3', 'on')),
+               (ldap.MOD_REPLACE, 'nsSSLClientAuth', secargs.get('nsSSLClientAuth', 'allowed')),
+               (ldap.MOD_REPLACE, 'nsSSL3Ciphers', secargs.get('nsSSL3Ciphers', '-rsa_null_md5,+rsa_rc4_128_md5,+rsa_rc4_40_md5,+rsa_rc2_40_md5,+rsa_des_sha,+rsa_fips_des_sha,+rsa_3des_sha,+rsa_fips_3des_sha,+fortezza,+fortezza_rc4_128_sha,+fortezza_null,+tls_rsa_export1024_with_rc4_56_sha,+tls_rsa_export1024_with_des_cbc_sha'))]
+        self.modify_s(dn, mod)
+
+        dn = 'cn=RSA,cn=encryption,cn=config'
+        ent = Entry(dn)
+        ent.setValues('objectclass', ['top', 'nsEncryptionModule'])
+        ent.setValues('nsSSLPersonalitySSL', secargs.get('nsSSLPersonalitySSL', 'Server-Cert'))
+        ent.setValues('nsSSLToken', secargs.get('nsSSLToken', 'internal (software)'))
+        ent.setValues('nsSSLActivation', secargs.get('nsSSLActivation', 'on'))
+        try: self.add_s(ent)
+        except ldap.ALREADY_EXISTS: pass
+
+        dn = 'cn=config'
+        mod = [(ldap.MOD_REPLACE, 'nsslapd-security', secargs.get('nsslapd-security', 'on')),
+               (ldap.MOD_REPLACE, 'nsslapd-ssl-check-hostname', secargs.get('nsslapd-ssl-check-hostname','off')),
+               (ldap.MOD_REPLACE, 'nsslapd-secureport', str(secport))]
+        self.modify_s(dn, mod)
+
+        if not sourcedir:
+            sourcedir = os.environ['SECDIR']
+        # get our cert dir
+        ent = self.getEntry(dn, ldap.SCOPE_BASE, '(objectclass=*)')
+        certdir = ent.getValue('nsslapd-certdir')
+        # copy security files from source dir to our cert dir
+        for ff in ['cert8.db', 'key3.db', 'secmod.db', 'pin.txt', 'certmap.conf']:
+            srcf = sourcedir + '/' + ff
+            destf = certdir + '/' + ff
+            # ensure dest is writable
+            try:
+                mode = os.stat(destf)[0]
+                newmode = mode|0600
+                os.chmod(destf, newmode)
+            except:
+                mode = 0
+            shutil.copy(srcf, destf)
+            if mode > 0: # reset mode
+                os.chmod(destf, mode)
+
+        # now, restart the ds
+        self.stop()
+        self.start(True)
 
     ###########################
     # Static methods start here
