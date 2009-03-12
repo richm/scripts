@@ -6,7 +6,7 @@ fi
 
 #assumes
 SLAPD=$0.orig
-VGSUPPRESS=/tmp/valgrind.supp
+VGSUPPRESS="--suppressions=/tmp/valgrind.supp"
 
 if [ $USE_PURIFY ]; then
 	LD_LIBRARY_PATH=$NETSITE_ROOT/lib:$NETSITE_ROOT/bin/slapd/lib:$LD_LIBRARY_PATH
@@ -17,7 +17,7 @@ if [ $USE_PURIFY ]; then
 fi
 
 if [ $USE_VALGRIND ]; then
-	CHECKCMD="valgrind --tool=memcheck --leak-check=yes --leak-resolution=high --suppressions=$VGSUPPRESS --num-callers=40 --log-file="
+	CHECKCMD="valgrind --tool=memcheck --leak-check=yes --leak-resolution=high $VGSUPPRESS --num-callers=40 --log-file="
 	# otherwise, run the same way we run purify
 	USE_PURIFY=1
 fi
@@ -41,9 +41,13 @@ elif [ $USE_PURIFY ]; then
 	if [ $TET_PNAME ]; then
 		mybase=`basename $TET_PNAME .ksh`
 		mybase=`basename $mybase .sh`
-		outputfile=/var/tmp/$mybase.vg
+        if [ -z "$mybase" ] ; then
+            mybase=unknown
+        fi
+        # for some reason, on fedora, --log-file does not append the pid
+		outputfile=/var/tmp/$mybase.vg.$$
 	else
-		outputfile=/var/tmp/slapd.vg
+		outputfile=/var/tmp/slapd.vg.$$
 	fi
 	CHECKCMD="${CHECKCMD}$outputfile"
 	case "$1" in
