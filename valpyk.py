@@ -116,7 +116,49 @@ class Function:
         else: # library
             return "obj:" + self.file
 
-class ConditionalError:
+class BaseError:
+    """
+    Base class for errors and leaks
+
+    Attributes: backtrace (list of functions)
+
+    Methods:
+    - hash(err): use it to compare errors and find duplicates
+    - str(err): Create one line of text to describe the error
+    """
+    def __init__(self,sourcefile):
+        """source file is the valgrind report file where the error occurred"""
+        self.backtrace = []
+        self.extra_backtrace = [] # some errors have additional backtrace info
+        self.sourcefile = sourcefile
+        self.duplicates = 0 # record how many duplicates this bug had
+
+    def __hash__(self):
+        data = [hash(func) for func in self.backtrace]
+        return hash(tuple(data))
+
+    def __nonzero__(self):
+        """Used to test if error: """
+        return len(self.backtrace) > 0
+
+    def __str__(self):
+        """Create one line of text to describe the error"""
+        return self.sourcefile + ":"
+
+    def supptype(self):
+        """Type to use for suppression e.g. Cond Leak etc."""
+        assert(False) # base class must override
+
+    def suppmore(self):
+        """Additional information to provide with suppression
+        e.g. a Param error has the syscall"""
+        return None
+
+    def founddup(self, error):
+        # if verbose, print error
+        self.duplicates = self.duplicates + 1
+
+class ConditionalError(BaseError):
     """
     "Conditional jump or move depends on uninitialised value(s)" error
 
@@ -126,24 +168,38 @@ class ConditionalError:
     - hash(err): use it to compare errors and find duplicates
     - str(err): Create one line of text to describe the error
     """
-    def __init__(self):
-        self.backtrace = []
-
-    def __hash__(self):
-        data = [hash(func) for func in self.backtrace]
-        return hash(tuple(data))
-
-    def __nonzero__(self):
-        return len(self.backtrace) > 0
-
     def __str__(self):
-        return "Conditional jump or move depends on uninitialised value(s)"
+        return BaseError.__str__(self) + "Conditional jump or move depends on uninitialised value(s)"
 
     def supptype(self):
         """What type of suppression to generate e.g. Cond, Value4, etc."""
         return "Cond"
 
-class UninitialisedValueError:
+class ParamError(BaseError):
+    """
+    "Syscall param (\S+) points to uninitialised byte(s)"
+
+    Attributes: backtrace (list of functions)
+
+    Methods:
+    - hash(err): use it to compare errors and find duplicates
+    - str(err): Create one line of text to describe the error
+    """
+    def __init__(self, sourcefile, syscall):
+        BaseError.__init__(self, sourcefile)
+        self.syscall = syscall
+
+    def __str__(self):
+        return BaseError.__str__(self) + "Syscall param %s points to uninitialised byte(s)" % self.syscall
+
+    def supptype(self):
+        """What type of suppression to generate e.g. Cond, Value4, etc."""
+        return "Param"
+
+    def suppmore(self):
+        return self.syscall
+
+class UninitialisedValueError(BaseError):
     """
     "Use of uninitialised value of size (...)" error.
 
@@ -154,8 +210,8 @@ class UninitialisedValueError:
     - hash(err): use it to compare errors and find duplicates
     - str(err): Create one line of text to describe the error
     """
-    def __init__(self, bytes):
-        self.backtrace = []
+    def __init__(self, sourcefile, bytes):
+        BaseError.__init__(self, sourcefile)
         self.bytes = bytes
 
     def __hash__(self):
@@ -163,32 +219,28 @@ class UninitialisedValueError:
         return hash(tuple(data))
 
     def __nonzero__(self):
-        return self.bytes != None
+        return BaseError.__nonzero__(self) and (self.bytes != None)
 
     def __str__(self):
-        return "Uninitialised value error: %s bytes" % self.bytes
+        return BaseError.__str__(self) + "Uninitialised value error: %s bytes" % self.bytes
 
     def supptype(self):
         """What type of suppression to generate e.g. Cond, Value4, etc."""
-        return "Value4"
+        return "Value" + str(self.bytes)
 
 class InvalidReadError(UninitialisedValueError):
     """
     "Invalid read of size (...)" error.
     """
     def __str__(self):
-        return "Invalid read: %s bytes" % self.bytes
+        return BaseError.__str__(self) + "Invalid read: %s bytes" % self.bytes
 
-    def supptype(self):
-        """What type of suppression to generate e.g. Cond, Value4, etc."""
-        return "Valud4"
-
-class ProgramError(UninitialisedValueError):
+class ProgramError(BaseError):
     """
     "Process terminating with (...)" error.
     """
-    def __init__(self, exit_code):
-        UninitialisedValueError.__init__(self, 0)
+    def __init__(self, sourcefile, exit_code):
+        BaseError.__init__(self, sourcefile)
         self.exit_code = exit_code
         self.reason = None
 
@@ -200,7 +252,7 @@ class MemoryLeak(UninitialisedValueError):
     Memory leak error, message like: "10 bytes in (...) loss record 2 of 9"
     """
     def __str__(self):
-        return "Memory leak: %s bytes" % self.bytes
+        return BaseError.__str__(self) + "Memory leak: %s bytes" % self.bytes
 
     def supptype(self):
         """What type of suppression to generate e.g. Cond, Value4, etc."""
@@ -221,6 +273,7 @@ class ValgrindParser(TextParser):
     VG_MAX_SUPP_CALLERS = 24 # Max number of callers for context in a suppression.
 
     regex_pid = r'==[0-9]+==' # matches pid at beginning of each line
+    re_pid = re.compile("^" + regex_pid)
     regex_num = r'[0-9,]+' # matches numbers with commas in the usual US format
     regex_empty = re.compile(r"^%s$" % regex_pid)
     regex_indirect = r' \(%s direct, %s indirect\)' % (regex_num, regex_num)
@@ -230,6 +283,12 @@ class ValgrindParser(TextParser):
     regex_cond = re.compile(r"^%s Conditional jump or move depends on uninitialised value\(s\)$" % regex_pid)
     regex_uninit = re.compile(r"^%s Use of uninitialised value of size (%s)$" % (regex_pid, regex_num))
     regex_invalid_read = re.compile(r"^%s Invalid read of size (%s)$" % (regex_pid, regex_num))
+    # ==14149== Syscall param pwrite64(buf) points to uninitialised byte(s)
+    regex_param = re.compile(r"^%s Syscall param (\S+) points to uninitialised byte\(s\)$" % regex_pid)
+    # ==17108==  Address 0xbc20b08 is 0 bytes after a block of size 128 alloc'd
+    regex_addr_alloc = re.compile(r"^%s  Address [0-9A-Fa-fx]+ is %s bytes (?:inside|after) a block of size %s alloc'd" % (regex_pid, regex_num, regex_num))
+    # ==18511==  Address 0xd5cb3c6 is not stack'd, malloc'd or (recently) free'd
+    regex_addr_none = re.compile(r"^%s  Address [0-9A-Fa-fx]+ is not stack'd, malloc'd or \(recently\) free'd" % regex_pid)
 
     # ==6471== 24 bytes in 1 blocks are definitely lost in loss record 271 of 1,254 
     regex_leak_header = re.compile(r"^%s (%s)(?:%s)? bytes in %s blocks are .* in loss record %s of %s$" % (regex_pid, regex_num, regex_indirect, regex_num, regex_num, regex_num))
@@ -239,6 +298,7 @@ class ValgrindParser(TextParser):
     regex_backtrace_unknown = re.compile(r"^%s    (?:at|by) (0x[0-9A-F]+): (\?\?\?)$" % regex_pid)
     regex_anyleak = re.compile(r'lost')
     regex_anyuninit = re.compile(r'uninitialized')
+    regex_anyparam = re.compile(r'Syscall param')
     use_filters = True
 
     def __init__(self, input, use_filters=True):
@@ -250,7 +310,20 @@ class ValgrindParser(TextParser):
         self.skipped_errors = 0
         self.skipped_leaks = 0
         self.use_filters = use_filters
-        TextParser.__init__(self, input, self.searchLeakHeader)
+        if not isinstance(input,list) and not isinstance(input,tuple):
+            inputlist = [input]
+        else:
+            inputlist = input
+        for input in inputlist:
+            if isinstance(input, file):
+                self.filename = "--input--"
+                infile = input
+            else: # assume filename
+                self.filename = input
+                infile = open(self.filename, "r")
+            TextParser.__init__(self, infile, self.searchLeakHeader)
+            if not isinstance(input, file):
+                infile.close()            
 
     def searchLeakHeader(self, line):
         """
@@ -260,35 +333,42 @@ class ValgrindParser(TextParser):
         if match:
 #            print "found memleak:", line
             size = match.group(1).replace(",", "")
-            self.error = MemoryLeak(int(size))
+            self.error = MemoryLeak(self.filename, int(size))
             return self.parseBacktrace
 
         match = self.regex_uninit.match(line)
         if match:
-            print "found uninit:", line
             size = match.group(1).replace(",", "")
-            self.error = UninitialisedValueError(int(size))
+            self.error = UninitialisedValueError(self.filename, int(size))
             return self.parseBacktrace
         elif self.regex_anyuninit.search(line):
-            print "line %s is a leak but did not match regex_uninit"
+            print "line %s is uninit error but did not match regex_uninit" % line
+
+        match = self.regex_param.match(line)
+        if match:
+            syscall = match.group(1)
+            self.error = ParamError(self.filename, syscall)
+            return self.parseBacktrace
+        elif self.regex_anyparam.search(line):
+            print "line %s is param error but did not match regex_param" % line
 
         match = self.regex_invalid_read.match(line)
         if match:
-            print "found invalid read:", line
+#            print "found invalid read:", line
             size = match.group(1).replace(",", "")
-            self.error = InvalidReadError(int(size))
+            self.error = InvalidReadError(self.filename, int(size))
             return self.parseBacktrace
 
         match = self.regex_cond.match(line)
         if match:
 #            print "found cond:", line
-            self.error = ConditionalError()
+            self.error = ConditionalError(self.filename)
             return self.parseBacktrace
 
         match = self.regex_terminating.match(line)
         if match:
-            print "found program error:", line
-            self.error = ProgramError(match.group(1))
+#            print "found program error:", line
+            self.error = ProgramError(self.filename, match.group(1))
             return self.parseProgramError
 
 #        print "searchLeakHeader: no match for line", line
@@ -313,7 +393,10 @@ class ValgrindParser(TextParser):
         if match:
             addr, name, filename, linenb = match.groups()
             func = Function(name, addr, filename, int(linenb))
-            self.error.backtrace.append(func)
+            if len(self.error.extra_backtrace) > 0:
+                self.error.extra_backtrace.append(func)
+            else:
+                self.error.backtrace.append(func)
             return
 
         # ==14694==    at 0x401C7AA: calloc (in /lib/...)
@@ -321,7 +404,10 @@ class ValgrindParser(TextParser):
         if match:
             addr, name, filename = match.groups()
             func = Function(name, addr, filename)
-            self.error.backtrace.append(func)
+            if len(self.error.extra_backtrace) > 0:
+                self.error.extra_backtrace.append(func)
+            else:
+                self.error.backtrace.append(func)
             return
 
         # ==14694==    by 0x4187E56: (within /lib/tls...)
@@ -329,7 +415,10 @@ class ValgrindParser(TextParser):
         if match:
             addr, filename = match.groups()
             func = Function(None, addr, filename)
-            self.error.backtrace.append(func)
+            if len(self.error.extra_backtrace) > 0:
+                self.error.extra_backtrace.append(func)
+            else:
+                self.error.backtrace.append(func)
             return
 
         # ==14694==    by 0x402646A: ???
@@ -337,7 +426,22 @@ class ValgrindParser(TextParser):
         if match:
             addr, name = match.groups()
             func = Function(name, addr)
-            self.error.backtrace.append(func)
+            if len(self.error.extra_backtrace) > 0:
+                self.error.extra_backtrace.append(func)
+            else:
+                self.error.backtrace.append(func)
+            return
+
+        match = self.regex_addr_alloc.match(line)
+        if match:
+#            print "found addr alloc error:", line
+            self.error.extra_backtrace = [self.re_pid.sub("", line)]
+            return
+
+        match = self.regex_addr_none.match(line)
+        if match:
+#            print "found addr none error:", line
+            self.error.extra_backtrace = [self.re_pid.sub("", line)]
             return
 
         if not self.regex_empty.match(line):
@@ -424,7 +528,7 @@ class ValgrindParser(TextParser):
         self.reset()
 
 def usage():
-    print """usage: %s logfilename
+    print """usage: %s logfilename [logfilename] ... [logfilename]
 
 Valgrind memory leak parser. To get good logs, run valgrind with options:
    --leak-check=full: see all informations about memory leaks
@@ -449,24 +553,61 @@ def displayErrors(errors, max_error=None, reverse=True, assupp=False):
         errors = errors
     if reverse:
         errors = errors[::-1]
-    displayed = set()
+    displayed = dict()
     for error in errors:
         key = hash(error)
-        if key in displayed:
-            print >>sys.stderr, "Skip duplicate"
+        checkdup = displayed.get(key, None)
+        if checkdup:
+            checkdup.founddup(error)
+#            print >>sys.stderr, "Skip duplicate"
             continue
-        displayed.add(key)
-        # Display memory error
+        displayed[key] = error
+
+    # create a table that maps to our desired comparison ordering
+    # of classes - the order is given in the list errclasses
+    errclasses = [ProgramError, InvalidReadError, ParamError,
+                 UninitialisedValueError, ConditionalError, MemoryLeak]
+    # We basically want to say something like
+    # cmpval = classhash[class1][class2]
+    # and have cmpval be -1, 0, or 1
+    classhash = {}
+    for ii in xrange(len(errclasses)):
+        clzz1 = errclasses[ii]
+        classhash[clzz1] = {}
+        # classes before us (lower ii) sort before us
+        for clzz2 in errclasses[:ii]:
+            classhash[clzz1][clzz2] = 1
+        # our class returns 0
+        classhash[clzz1][clzz1] = 0
+        # classes after us (higher ii) sort after us
+        for clzz2 in errclasses[(ii+1):]:
+            classhash[clzz1][clzz2] = -1
+        
+    def customsort(obj1, obj2):
+        """sort first by type, then by number of duplicates"""
+        retval = classhash[obj1.__class__][obj2.__class__]
+        if retval == 0:
+            retval =  obj2.duplicates - obj1.duplicates
+        return retval
+
+    bydups = displayed.values()
+    bydups.sort(customsort)
+
+    for error in bydups:
+        # Display error
         if assupp:
             print "{"
             diff = len(error.backtrace) - ValgrindParser.VG_MAX_SUPP_CALLERS
             if diff > 0:
-                print "   Stack size too big by", diff, error
+                print "   Stack size too big by", diff, error, "duplicates: ", error.duplicates
             else:
                 print "  ", error
             print "   Memcheck:%s" % error.supptype()
+            suppmore = error.suppmore()
+            if suppmore:
+                print "  ", suppmore
         else:
-            print error
+            print error, "duplicates: ", error.duplicates
 
         # Display backtrace
         #backtrace = [ func for func in error.backtrace if func.name != "-unknown-" ]
@@ -478,6 +619,11 @@ def displayErrors(errors, max_error=None, reverse=True, assupp=False):
                 print "   > %s" % func
         if assupp:
             print "}"
+        if not assupp and len(error.extra_backtrace) > 0:
+            print error.extra_backtrace[0]
+            for line in error.extra_backtrace[1:]:
+                print "   >", line
+                
 
     # Display memory errors count
     print "Total: %s (%s)" % (len(displayed), len(errors))
@@ -485,23 +631,26 @@ def displayErrors(errors, max_error=None, reverse=True, assupp=False):
 
 def main():
     # Read log filename
-    if len(sys.argv) != 2:
+    if len(sys.argv) < 2:
         usage()
         sys.exit(1)
-    filename = sys.argv[1]
+    assupp = False
+    if sys.argv[1] == '-s':
+        assupp = True
+        sys.argv.pop(1)
 
     # Parse input log
-    parser = ValgrindParser( open(filename, "r"), False )
+    parser = ValgrindParser(sys.argv[1:], False)
 
     # Display all errors
-    displayErrors(parser.errors, None, False, True)
+    displayErrors(parser.errors, None, False, assupp)
 
     # Display memory leaks in reverse order (bigest to smallest leak)
     # Only display top 10 leaks
 #    displayErrors(parser.leaks, 10, True)
 
     # Display all leaks as suppressions
-    displayErrors(parser.leaks, None, False, True)
+    displayErrors(parser.leaks, None, False, assupp)
 
     if parser.skipped_errors:
         print "Skipped errors: %s" % parser.skipped_errors
