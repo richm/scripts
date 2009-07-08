@@ -65,18 +65,18 @@ m1.startReplication_async(agmtm1tom2)
 print "repl status after starting"
 print m1.getReplStatus(agmtm1tom2)
 print "shutdown m2 . . ."
-m2.stop()
+#m2.stop()
 time.sleep(1)
 if m1.waitForReplInit(agmtm1tom2):
     print "repl init failed"
     print m1.getReplStatus(agmtm1tom2)
     time.sleep(1)
     print "try repl init again"
-    m2.start()
+#    m2.start()
     time.sleep(5)
     m1.startReplication(agmtm1tom2)
 else:
-    m2.start()
+#    m2.start()
     print "repl init succeeded!!!!!"
     print m1.getReplStatus(agmtm1tom2)
 
@@ -100,7 +100,7 @@ print "Check replication status - note number of changes sent, in progress . . .
 print m1.getReplStatus(agmtm1tom2)
 
 print "shutdown m2 . . ."
-m2.stop()
+#m2.stop()
 
 time.sleep(1)
 print "Check replication status - note number of changes sent, in progress . . ."
@@ -108,7 +108,7 @@ print m1.getReplStatus(agmtm1tom2)
 
 time.sleep(1)
 print "start m2 . . ."
-m2.start()
+#m2.start()
 
 time.sleep(20)
 print "Check replication status - note number of changes sent, in progress . . ."

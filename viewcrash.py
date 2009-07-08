@@ -1,5 +1,6 @@
 
 import os
+import sys
 import ldap
 from dsadmin import DSAdmin, Entry
 
@@ -17,18 +18,17 @@ m1replargs = {
 	'bindcn': "replrepl",
 	'bindpw': "replrepl"
 }
-#os.environ['USE_DBX'] = "1"
+os.environ['USE_GDB'] = "1"
 m1 = DSAdmin.createAndSetupReplica({
 	'newrootpw': 'password',
 	'newhost': host1,
 	'newport': port1,
 	'newinst': 'm1',
 	'newsuffix': basedn,
-	'verbose': True,
     'no_admin': True
 }, m1replargs
 )
-#del os.environ['USE_DBX']
+del os.environ['USE_GDB']
 
 m2replargs = {
 	'suffix': basedn,
@@ -37,14 +37,12 @@ m2replargs = {
 	'bindcn': "replrepl",
 	'bindpw': "replrepl"
 }
-#os.environ['USE_DBX'] = 1
 m2 = DSAdmin.createAndSetupReplica({
 	'newrootpw': 'password',
 	'newhost': host2,
 	'newport': port2,
 	'newinst': 'm2',
 	'newsuffix': basedn,
-	'verbose': True,
     'no_admin': True
 }, m2replargs
 )
@@ -59,13 +57,12 @@ agmtm2tom1 = m2.setupAgreement(m1, m2replargs)
 #initfile = '/tmp/viewcrash.ldif'
 #m1.importLDIF(initfile, '', "userRoot", True)
 
-sys.exit(0)
-
 print "Add ou=people,", basedn
 dn = "ou=people," + basedn
 ent = Entry(dn)
 ent.setValues('objectclass', 'top', 'organizationalUnit')
-m1.add_s(ent)
+try: m1.add_s(ent)
+except ldap.ALREADY_EXISTS: pass
 
 print "add the nsview objectclass to %s" % basedn
 dn = basedn
@@ -79,7 +76,8 @@ m1.modify_s(dn, replace)
 
 print "add the nsviewfilter objectclass to ou=people"
 dn = "ou=people," + basedn
-replace = [(ldap.MOD_ADD, 'nsviewfilter', 'Cupertino')]
+#replace = [(ldap.MOD_ADD, 'nsviewfilter', 'Cupertino')]
+replace = [(ldap.MOD_ADD, 'nsviewfilter', '(l=Cupertino)')]
 m1.modify_s(dn, replace)
 
 print "add a dummy entry in ou=people"

@@ -7,17 +7,22 @@ fi
 #assumes
 SLAPD=$0.orig
 VGSUPPRESS="--suppressions=/tmp/valgrind.supp"
+# by default valgrind will demangle C++ symbols for you
+# but valgrind must have mangled symbols in suppression files
+#DEMANGLE="--demangle=no"
+# use quiet mode if you only want the errors and nothing but the errors
+QUIETMODE="-q"
 
 if [ $USE_PURIFY ]; then
 	LD_LIBRARY_PATH=$NETSITE_ROOT/lib:$NETSITE_ROOT/bin/slapd/lib:$LD_LIBRARY_PATH
 	export LD_LIBRARY_PATH
-	PURIFYOPTIONS="-windows=no -log-file=purify.$$.log -append-logfile=yes -follow-child-processes=no -chain-length=40"
+	PURIFYOPTIONS="-windows=no -log-file=purify.$$.log -append-logfile=yes -follow-child-processes=no -chain-length=50"
 	export PURIFYOPTIONS
 	SLAPD=./ns-slapd.pure
 fi
 
 if [ $USE_VALGRIND ]; then
-	CHECKCMD="valgrind --tool=memcheck --leak-check=yes --leak-resolution=high $VGSUPPRESS --num-callers=40 --log-file="
+	CHECKCMD="valgrind $QUIETMODE --tool=memcheck --leak-check=yes --leak-resolution=high $VGSUPPRESS $DEMANGLE --num-callers=50 --log-file="
 	# otherwise, run the same way we run purify
 	USE_PURIFY=1
 fi
