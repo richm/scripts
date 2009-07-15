@@ -132,6 +132,7 @@ class BaseError:
         self.extra_backtrace = [] # some errors have additional backtrace info
         self.sourcefile = sourcefile
         self.duplicates = 0 # record how many duplicates this bug had
+        self.bytes = 0 # not all types of errors will use this
 
     def __hash__(self):
         data = [hash(func) for func in self.backtrace]
@@ -289,6 +290,12 @@ class ValgrindParser(TextParser):
     regex_addr_alloc = re.compile(r"^%s  Address [0-9A-Fa-fx]+ is %s bytes (?:inside|after) a block of size %s alloc'd" % (regex_pid, regex_num, regex_num))
     # ==18511==  Address 0xd5cb3c6 is not stack'd, malloc'd or (recently) free'd
     regex_addr_none = re.compile(r"^%s  Address [0-9A-Fa-fx]+ is not stack'd, malloc'd or \(recently\) free'd" % regex_pid)
+    regex_unhandled = re.compile(r"^%s Warning: noted but unhandled ioctl (0x[0-9A-Fa-f]+) with no size/direction hints" % regex_pid)
+    regex_spurious = re.compile(r"^%s    This could cause spurious value errors to appear." % regex_pid)
+    regex_missing = re.compile(r"^%s    See README_MISSING_SYSCALL_OR_IOCTL for guidance on writing a proper wrapper." % regex_pid)
+    regex_thread = re.compile(r"^%s Thread .*$" % regex_pid)
+    regex_toomany = re.compile(r"^%s More than (%s) errors detected.  Subsequent errors" % (regex_pid, regex_num))
+    regex_toomany2 = re.compile(r"^%s will still be recorded, but in less detail than before." % regex_pid)
 
     # ==6471== 24 bytes in 1 blocks are definitely lost in loss record 271 of 1,254 
     regex_leak_header = re.compile(r"^%s (%s)(?:%s)? bytes in %s blocks are .* in loss record %s of %s$" % (regex_pid, regex_num, regex_indirect, regex_num, regex_num, regex_num))
@@ -307,6 +314,8 @@ class ValgrindParser(TextParser):
         """
         self.errors = []
         self.leaks = []
+        self.unhandled = {}
+        self.toomany = 0
         self.skipped_errors = 0
         self.skipped_leaks = 0
         self.use_filters = use_filters
@@ -371,7 +380,44 @@ class ValgrindParser(TextParser):
             self.error = ProgramError(self.filename, match.group(1))
             return self.parseProgramError
 
-#        print "searchLeakHeader: no match for line", line
+        match = self.regex_unhandled.match(line)
+        if match:
+#            print "found unhandled ioctl error:", line
+            ioctl = match.group(1)
+            val = self.unhandled.get(ioctl, 0) + 1
+            self.unhandled[ioctl] = val
+            return self.searchLeakHeader
+
+        match = self.regex_spurious.match(line)
+        if match:
+            # ignore
+            return self.searchLeakHeader
+
+        match = self.regex_missing.match(line)
+        if match:
+            # ignore
+            return self.searchLeakHeader
+
+        match = self.regex_thread.match(line)
+        if match:
+            # ignore
+            return self.searchLeakHeader
+
+        match = self.regex_toomany.match(line)
+        if match:
+            self.toomany = self.toomany + 1
+            return self.searchLeakHeader
+
+        match = self.regex_toomany2.match(line)
+        if match:
+            # ignore
+            return self.searchLeakHeader
+
+        if self.regex_empty.match(line):
+            # ignore empty
+            return self.searchLeakHeader
+
+        print 'searchLeakHeader: no match for line "%s"' % line
 
     def parseProgramError(self, line):
         """
@@ -444,8 +490,24 @@ class ValgrindParser(TextParser):
             self.error.extra_backtrace = [self.re_pid.sub("", line)]
             return
 
+        match = self.regex_unhandled.match(line)
+        if match:
+            self.addError() # this terminates the current error
+#            print "found unhandled ioctl error:", line
+            ioctl = match.group(1)
+            val = self.unhandled.get(ioctl, 0) + 1
+            self.unhandled[ioctl] = val
+            return self.searchLeakHeader
+
+        match = self.regex_cond.match(line)
+        if match:
+            self.addError() # this terminates the current error
+#            print "found cond:", line
+            self.error = ConditionalError(self.filename)
+            return self.parseBacktrace
+
         if not self.regex_empty.match(line):
-            print >>sys.stderr, 'Unknown: "%s"' % line
+            print >>sys.stderr, 'parseBacktrace: no match for "%s"' % line
         self.addError()
         return self.searchLeakHeader
 
@@ -584,10 +646,12 @@ def displayErrors(errors, max_error=None, reverse=True, assupp=False):
             classhash[clzz1][clzz2] = -1
         
     def customsort(obj1, obj2):
-        """sort first by type, then by number of duplicates"""
+        """sort first by type, then by number of duplicates, then by number of bytes"""
         retval = classhash[obj1.__class__][obj2.__class__]
         if retval == 0:
             retval =  obj2.duplicates - obj1.duplicates
+        if retval == 0:
+            retval = obj2.bytes - obj1.bytes
         return retval
 
     bydups = displayed.values()
@@ -610,7 +674,6 @@ def displayErrors(errors, max_error=None, reverse=True, assupp=False):
             print error, "duplicates: ", error.duplicates
 
         # Display backtrace
-        #backtrace = [ func for func in error.backtrace if func.name != "-unknown-" ]
         backtrace = [ func for func in error.backtrace ]
         for func in backtrace:
             if assupp:
@@ -641,6 +704,12 @@ def main():
 
     # Parse input log
     parser = ValgrindParser(sys.argv[1:], False)
+
+    for (ioctl, count) in parser.unhandled.iteritems():
+        print "Found %d cases of unhandled ioctl %s" % (count, ioctl)
+
+    if parser.toomany:
+        print "Found %d programs with too many errors: fix them or suppress them to get full output" % parser.toomany
 
     # Display all errors
     displayErrors(parser.errors, None, False, assupp)
