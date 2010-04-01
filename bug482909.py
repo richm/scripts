@@ -5,7 +5,7 @@ import time
 import ldap
 from dsadmin import DSAdmin, Entry
 
-host1 = "vmhost.testdomain.com"
+host1 = "USEFQDN"
 port1 = 1200
 secport1 = port1+1
 basedn = "dc=example,dc=com"
