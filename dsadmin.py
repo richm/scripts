@@ -178,28 +178,28 @@ csn.subseq is not currently used"""
 
     def __eq__(self, oth): return cmp(self, oth) == 0
 
-    def diff2str(self, oth, selfstr, othstr):
+    def diff2str(self, oth):
         retstr = ''
         (tsdiff, seqdiff, riddiff, subseqdiff) = self.csndiff(oth)
         diff = oth.ts - self.ts
         if diff > 0:
             td = datetime.timedelta(seconds=diff)
-            retstr = "%s is ahead of %s by %s" % (selfstr, othstr, td)
+            retstr = "is behind by %s" % td
         elif diff < 0:
             td = datetime.timedelta(seconds=-diff)
-            retstr = "%s is behind %s by %s" % (selfstr, othstr, td)
+            retstr = "is ahead by %s" % td
         else:
             diff = oth.seq - self.seq
             if diff:
-                retstr = "%s seq differs from %s by %d" % (selfstr, othstr, diff)
+                retstr = "seq differs by %d" % diff
             elif self.rid != oth.rid:
-                retstr = "%s rid %d not equal to %s rid %d" % (selfstr, self.rid, othstr, oth.rid)
+                retstr = "rid %d not equal to rid %d" % (self.rid, oth.rid)
             else:
-                retstr = "%s csn equals %s" % (selfstr, othstr)
+                retstr = "equal"
         return retstr
 
     def __repr__(self):
-        return time.asctime(time.localtime(self.ts)) + " seq: " + str(self.seq) + " rid: " + str(self.rid)
+        return time.strftime("%x %X", time.localtime(self.ts)) + " seq: " + str(self.seq) + " rid: " + str(self.rid)
 
     def __str__(self): return self.__repr__()
 
@@ -231,7 +231,7 @@ the ruv from the cn=replica entry"""
             if matchgen:
                 self.gen = CSN(matchgen.group(1))
             elif matchruv:
-                rid = matchruv.group(1)
+                rid = int(matchruv.group(1))
                 self.rid[rid] = {'url': matchruv.group(2),
                                  'min': CSN(matchruv.group(3)),
                                  'max': CSN(matchruv.group(4))}
@@ -240,7 +240,7 @@ the ruv from the cn=replica entry"""
         for item in ent.getValues('nsruvReplicaLastModified'):
             matchruv = RUV.ruvre.match(item)
             if matchruv:
-                rid = matchruv.group(1)
+                rid = int(matchruv.group(1))
                 self.rid[rid]['lastmod'] = int(matchruv.group(3), 16)
             else:
                 print "unknown nsruvReplicaLastModified item", item
@@ -250,27 +250,42 @@ the ruv from the cn=replica entry"""
         if not self: return -1 # None is less than something
         if not oth: return 1 # something is greater than None
         diff = cmp(self.gen, oth.gen)
-        if diff != 0:
-            print "generation", self.gen, "not equal to", oth.gen, ": likely not yet initialized"
-            return diff
+        if diff: return diff
         for rid in self.rid.keys():
-            url = self.rid[rid]['url']
-            csn = self.rid[rid]['min']
-            urloth = oth.rid[rid]['url']
-            csnoth = oth.rid[rid]['min']
-            csndiff = cmp(csn, csnoth)
-            if csndiff:
-                print "mincsn of", csn.diff2str(csnoth, url, urloth), str(csn), "vs", str(csnoth)
-                if not diff:
-                    diff = csndiff
-            csn = self.rid[rid]['max']
-            csnoth = oth.rid[rid]['max']
-            csndiff = cmp(csn, csnoth)
-            if csndiff:
-                print "maxcsn of", csn.diff2str(csnoth, url, urloth), str(csn), "vs", str(csnoth)
-                if not diff:
-                    diff = csndiff
-        return diff
+            for item in ('max', 'min'):
+                csn = self.rid[rid][item]
+                csnoth = oth.rid[rid][item]
+                diff = cmp(csn, csnoth)
+                if diff: return diff
+        return 0
+
+    def __eq__(self, oth): return cmp(self, oth) == 0
+
+    def getdiffs(self, oth):
+        """Compare two ruvs and return the differences
+        returns a tuple - the first element is the
+        result of cmp() - the second element is a string"""
+        if self is oth: return (0, "\tRUVs are the same")
+        if not self: return (-1, "\tfirst RUV is empty")
+        if not oth: return (1, "\tsecond RUV is empty")
+        diff = cmp(self.gen, oth.gen)
+        if diff:
+            return (diff, "\tgeneration [" + str(self.gen) + "] not equal to [" + str(oth.gen) + "]: likely not yet initialized")
+        retstr = ''
+        for rid in self.rid.keys():
+            for item in ('max', 'min'):
+                csn = self.rid[rid][item]
+                csnoth = oth.rid[rid][item]
+                csndiff = cmp(csn, csnoth)
+                if csndiff:
+                    if len(retstr): retstr += "\n"
+                    retstr += "\trid %d %scsn %s\n\t[%s] vs [%s]" % (rid, item, csn.diff2str(csnoth),
+                                                                     csn, csnoth)
+                    if not diff:
+                        diff = csndiff
+        if not diff: retstr = "\tup-to-date - RUVs are equal"
+        return (diff, retstr)
+
 
 def wrapper(f,name):
     """This is the method that wraps all of the methods of the superclass.  This seems
@@ -1070,7 +1085,8 @@ class DSAdmin(SimpleLDAPObject):
         except ldap.NO_SUCH_OBJECT: entry = None
         if entry:
             print "Already setup replica for suffix", suffix
-            self.suffixes[nsuffix] = {}
+            if not nsuffix in self.suffixes:
+                self.suffixes[nsuffix] = {}
             self.suffixes[nsuffix]['dn'] = dn
             self.suffixes[nsuffix]['type'] = type
             return 0
@@ -1127,9 +1143,7 @@ class DSAdmin(SimpleLDAPObject):
             return -1
         else:
             print entry
-        self.suffixes[nsuffix] = {}
-        self.suffixes[nsuffix]['dn'] = dn
-        self.suffixes[nsuffix]['type'] = type
+        self.suffixes[nsuffix] = {'dn': dn, 'type': type}
         return 0
 
     # dn can be an entry
@@ -1203,7 +1217,8 @@ class DSAdmin(SimpleLDAPObject):
         if entry:
             print "Agreement exists:"
             print entry
-            self.suffixes[nsuffix] = {}
+            if not nsuffix in self.suffixes:
+                self.suffixes[nsuffix] = {}
             self.suffixes[nsuffix][str(repoth)] = dn
             return dn
         if repoth in self.agmt:
