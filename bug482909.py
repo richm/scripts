@@ -5,52 +5,25 @@ import time
 import ldap
 from dsadmin import DSAdmin, Entry
 
-host1 = "localhost.localdomain"
-host2 = host1
-cfgport = 1100
-port1 = cfgport+10
+host1 = "vmhost.testdomain.com"
+port1 = 1200
 secport1 = port1+1
-port2 = cfgport+20
-secport2 = port2+1
 basedn = "dc=example,dc=com"
 
-m1replargs = {
-	'suffix': basedn,
-	'bename': "userRoot",
-	'binddn': "cn=replrepl,cn=config",
-	'bindcn': "replrepl",
-	'bindpw': "replrepl",
-    'bindmethod': 'SSLCLIENTAUTH',
-    'starttls': True,
-    'log'   : False
-}
-m2replargs = m1replargs
-
 #os.environ['USE_DBX'] = "1"
-m1 = DSAdmin.createInstance({
+srv = DSAdmin.createInstance({
 	'newrootpw': 'password',
 	'newhost': host1,
 	'newport': port1,
-	'newinst': 'm1',
+	'newinst': 'srv',
 	'newsuffix': basedn,
 	'verbose': False,
     'no_admin': True
 })
 #del os.environ['USE_DBX']
 
-m2 = DSAdmin.createInstance({
-	'newrootpw': 'password',
-	'newhost': host2,
-	'newport': port2,
-	'newinst': 'm2',
-	'newsuffix': basedn,
-	'verbose': False,
-    'no_admin': True
-})
-
-m1.setupSSL(secport1, os.environ['SECDIR'],
-            {'nsslapd-security': 'off'})
-m2.setupSSL(secport2)
+srv.setupSSL(secport1, os.environ['SECDIR'],
+            {'nsslapd-security': 'on'})
 
 m1.replicaSetupAll(m1replargs)
 m2.replicaSetupAll(m2replargs)

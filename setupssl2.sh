@@ -15,6 +15,12 @@ else
     ldapport=389
 fi
 
+if [ "$3" ] ; then
+    ldapsport=$3
+else
+    ldapsport=636
+fi
+
 me=`whoami`
 if [ "$me" = "root" ] ; then
     isroot=1
@@ -122,17 +128,17 @@ else
 fi
 if test -n "$needServerCert" ; then
 # 7. Generate the server certificate:
-    echo "Generating server certificate for Fedora Directory Server on host $myhost"
+    echo "Generating server certificate for 389 Directory Server on host $myhost"
     echo Using fully qualified hostname $myhost for the server name in the server cert subject DN
     echo Note: If you do not want to use this hostname, edit this script to change myhost to the
     echo real hostname you want to use
-    certutil -S $prefixarg -n "Server-Cert" -s "cn=$myhost,ou=Fedora Directory Server" -c "CA certificate" -t "u,u,u" -m 1001 -v 120 -d $secdir -z $secdir/noise.txt -f $secdir/pwdfile.txt
+    certutil -S $prefixarg -n "Server-Cert" -s "cn=$myhost,ou=389 Directory Server" -c "CA certificate" -t "u,u,u" -m 1001 -v 120 -d $secdir -z $secdir/noise.txt -f $secdir/pwdfile.txt
 fi
 
 if test -n "$needASCert" ; then
 # Generate the admin server certificate
     echo Creating the admin server certificate
-    certutil -S $prefixarg -n "server-cert" -s "cn=$myhost,ou=Fedora Administration Server" -c "CA certificate" -t "u,u,u" -m 1002 -v 120 -d $secdir -z $secdir/noise.txt -f $secdir/pwdfile.txt
+    certutil -S $prefixarg -n "server-cert" -s "cn=$myhost,ou=389 Administration Server" -c "CA certificate" -t "u,u,u" -m 1002 -v 120 -d $secdir -z $secdir/noise.txt -f $secdir/pwdfile.txt
 
 # export the admin server certificate/private key for import into its key/cert db
     echo Exporting the admin server certificate pk12 file
@@ -231,6 +237,9 @@ nsslapd-security: on
 -
 replace: nsslapd-ssl-check-hostname
 nsslapd-ssl-check-hostname: off
+-
+replace: nsslapd-secureport
+nsslapd-secureport: $ldapsport
 
 dn: cn=RSA,cn=encryption,cn=config
 changetype: add

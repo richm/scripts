@@ -19,7 +19,6 @@ m1 = DSAdmin.createInstance({
 	'newport': port1,
 	'newinst': 'm1',
 	'newsuffix': 'dc=example,dc=com',
-	'verbose': True,
     'no_admin': True
 })
 #del os.environ['USE_DBX']

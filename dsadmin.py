@@ -15,6 +15,7 @@ import operator
 import tempfile
 import pprint
 import shutil
+import datetime
 
 from ldap.ldapobject import SimpleLDAPObject
 
@@ -85,9 +86,10 @@ class Entry:
         """Get the first value for the attribute named name"""
         return self.data.get(name,[None])[0]
 
-    def hasValue(self,name,val):
+    def hasValue(self,name,val=None):
         """True if the given attribute is present and has the given value"""
         if not self.hasAttr(name): return False
+        if not val: return True
         return val in self.data.get(name)
 
     def hasValueCase(self,name,val):
@@ -139,6 +141,137 @@ class Entry:
         ldif.LDIFWriter(sio,Entry.base64_attrs,1000).unparse(self.dn,newdata)
         return sio.getvalue()
 
+class CSN:
+    """CSN is Change Sequence Number
+csn.ts is the timestamp (time_t - seconds)
+csn.seq is the sequence number (max 65535)
+csn.rid is the replica ID of the originating master
+csn.subseq is not currently used"""
+    csnpat = r'(.{8})(.{4})(.{4})(.{4})'
+    csnre = re.compile(csnpat)
+    def __init__(self, csnstr):
+        match = CSN.csnre.match(csnstr)
+        if match:
+            self.ts = int(match.group(1), 16)
+            self.seq = int(match.group(2), 16)
+            self.rid = int(match.group(3), 16)
+            self.subseq = int(match.group(4), 16)
+        else:
+            self.ts = 0
+            self.seq = 0
+            self.rid = 0
+            self.subseq = 0
+            print csnstr, "is not a valid CSN"
+
+    def csndiff(self, oth):
+        return (oth.ts - self.ts, oth.seq - self.seq, oth.rid - self.rid, oth.subseq - self.subseq)
+
+    def __cmp__(self, oth):
+        if self is oth: return 0
+        (tsdiff, seqdiff, riddiff, subseqdiff) = self.csndiff(oth)
+
+        diff = tsdiff or seqdiff or riddiff or subseqdiff
+        ret = 0
+        if diff > 0: ret = 1
+        elif diff < 0: ret = -1
+        return ret
+
+    def __eq__(self, oth): return cmp(self, oth) == 0
+
+    def diff2str(self, oth, selfstr, othstr):
+        retstr = ''
+        (tsdiff, seqdiff, riddiff, subseqdiff) = self.csndiff(oth)
+        diff = oth.ts - self.ts
+        if diff > 0:
+            td = datetime.timedelta(seconds=diff)
+            retstr = "%s is ahead of %s by %s" % (selfstr, othstr, td)
+        elif diff < 0:
+            td = datetime.timedelta(seconds=-diff)
+            retstr = "%s is behind %s by %s" % (selfstr, othstr, td)
+        else:
+            diff = oth.seq - self.seq
+            if diff:
+                retstr = "%s seq differs from %s by %d" % (selfstr, othstr, diff)
+            elif self.rid != oth.rid:
+                retstr = "%s rid %d not equal to %s rid %d" % (selfstr, self.rid, othstr, oth.rid)
+            else:
+                retstr = "%s csn equals %s" % (selfstr, othstr)
+        return retstr
+
+    def __repr__(self):
+        return time.asctime(time.localtime(self.ts)) + " seq: " + str(self.seq) + " rid: " + str(self.rid)
+
+    def __str__(self): return self.__repr__()
+
+class RUV:
+    """RUV is Replica Update Vector
+ruv.gen is the generation CSN
+ruv.rid[1] through ruv.rid[N] are dicts - the number (1-N) is the replica ID
+  ruv.rid[N][url] is the purl
+  ruv.rid[N][min] is the min csn
+  ruv.rid[N][max] is the max csn
+  ruv.rid[N][lastmod] is the last modified timestamp
+example ruv attr:
+nsds50ruv: {replicageneration} 3b0ebc7f000000010000
+nsds50ruv: {replica 1 ldap://myhost:51010} 3b0ebc9f000000010000 3b0ebef7000000010000
+nsruvReplicaLastModified: {replica 1 ldap://myhost:51010} 292398402093
+if the tryrepl flag is true, if getting the ruv from the suffix fails, try getting
+the ruv from the cn=replica entry"""
+    genpat = r'\{replicageneration\}\s+(\w+)'
+    genre = re.compile(genpat)
+    ruvpat = r'\{replica\s+(\d+)\s+(.+?)\}\s*(\w*)\s*(\w*)'
+    ruvre = re.compile(ruvpat)
+    def __init__(self, ent):
+        # rid is a dict
+        # key is replica ID - val is dict of url, min csn, max csn
+        self.rid = {}
+        for item in ent.getValues('nsds50ruv'):
+            matchgen = RUV.genre.match(item)
+            matchruv = RUV.ruvre.match(item)
+            if matchgen:
+                self.gen = CSN(matchgen.group(1))
+            elif matchruv:
+                rid = matchruv.group(1)
+                self.rid[rid] = {'url': matchruv.group(2),
+                                 'min': CSN(matchruv.group(3)),
+                                 'max': CSN(matchruv.group(4))}
+            else:
+                print "unknown RUV element", item
+        for item in ent.getValues('nsruvReplicaLastModified'):
+            matchruv = RUV.ruvre.match(item)
+            if matchruv:
+                rid = matchruv.group(1)
+                self.rid[rid]['lastmod'] = int(matchruv.group(3), 16)
+            else:
+                print "unknown nsruvReplicaLastModified item", item
+
+    def __cmp__(self, oth):
+        if self is oth: return 0
+        if not self: return -1 # None is less than something
+        if not oth: return 1 # something is greater than None
+        diff = cmp(self.gen, oth.gen)
+        if diff != 0:
+            print "generation", self.gen, "not equal to", oth.gen, ": likely not yet initialized"
+            return diff
+        for rid in self.rid.keys():
+            url = self.rid[rid]['url']
+            csn = self.rid[rid]['min']
+            urloth = oth.rid[rid]['url']
+            csnoth = oth.rid[rid]['min']
+            csndiff = cmp(csn, csnoth)
+            if csndiff:
+                print "mincsn of", csn.diff2str(csnoth, url, urloth), str(csn), "vs", str(csnoth)
+                if not diff:
+                    diff = csndiff
+            csn = self.rid[rid]['max']
+            csnoth = oth.rid[rid]['max']
+            csndiff = cmp(csn, csnoth)
+            if csndiff:
+                print "maxcsn of", csn.diff2str(csnoth, url, urloth), str(csn), "vs", str(csnoth)
+                if not diff:
+                    diff = csndiff
+        return diff
+
 def wrapper(f,name):
     """This is the method that wraps all of the methods of the superclass.  This seems
     to need to be an unbound method, that's why it's outside of DSAdmin.  Perhaps there
@@ -160,12 +293,12 @@ def wrapper(f,name):
                     return objtype, Entry(data)
                 elif isinstance(data,list):
                     # AD sends back these search references
-                    if objtype == ldap.RES_SEARCH_RESULT and \
-                       isinstance(data[-1],tuple) and \
-                       not data[-1][0]:
-                        print "Received search reference: "
-                        pprint.pprint(data[-1][1])
-                        data.pop() # remove the last non-entry element
+#                     if objtype == ldap.RES_SEARCH_RESULT and \
+#                        isinstance(data[-1],tuple) and \
+#                        not data[-1][0]:
+#                         print "Received search reference: "
+#                         pprint.pprint(data[-1][1])
+#                         data.pop() # remove the last non-entry element
                            
                     return objtype, [Entry(x) for x in data]
                 else:
@@ -307,6 +440,7 @@ class DSAdmin(SimpleLDAPObject):
         self.bindpw = bindpw
         self.isLocal = DSAdmin.isLocalHost(host)
         self.suffixes = {}
+        self.agmt = {}
         self.__localinit__()
 
     def __str__(self):
@@ -466,7 +600,7 @@ class DSAdmin(SimpleLDAPObject):
 
     def importLDIF(self,file,suffix,be=None,verbose=False):
         cn = "import" + str(int(time.time()));
-        dn = "cn=%s, cn=import, cn=tasks, cn=config" % cn
+        dn = "cn=%s,cn=import,cn=tasks,cn=config" % cn
         entry = Entry(dn)
         entry.setValues('objectclass', 'top', 'extensibleObject')
         entry.setValues('cn', cn)
@@ -488,7 +622,7 @@ class DSAdmin(SimpleLDAPObject):
 
     def exportLDIF(self, file, suffix, forrepl=False, verbose=False):
         cn = "export" + str(int(time.time()))
-        dn = "cn=%s, cn=export, cn=tasks, cn=config" % cn
+        dn = "cn=%s,cn=export,cn=tasks,cn=config" % cn
         entry = Entry(dn)
         entry.setValues('objectclass', 'top', 'extensibleObject')
         entry.setValues('cn', cn)
@@ -507,9 +641,55 @@ class DSAdmin(SimpleLDAPObject):
                 print "Export task %s for file %s completed successfully" % (cn,file)
         return rc
 
+    def createIndex(self, suffix, attr, verbose=False):
+        cn = "index" + str(int(time.time()))
+        dn = "cn=%s,cn=index,cn=tasks,cn=config" % cn
+        entry = Entry(dn)
+        entry.setValues('objectclass', 'top', 'extensibleObject')
+        entry.setValues('cn', cn)
+        entry.setValues('nsIndexAttribute', attr)
+        beents = self.getBackendsForSuffix(suffix, ['cn'])
+        # assume 1 local backend
+        entry.setValues('nsInstance', beents[0].cn)
+        rc = self.startTaskAndWait(entry, verbose)
+
+        if rc:
+            if verbose:
+                print "Error: index task %s for file %s exited with %d" % (cn,file,rc)
+        else:
+            if verbose:
+                print "Index task %s for file %s completed successfully" % (cn,file)
+        return rc
+
+    def addLDIF(self, file, cont=False):
+        class LDIFAdder(ldif.LDIFParser):
+            def __init__(self, input_file, conn, cont=False,
+                ignored_attr_types=None,max_entries=0,process_url_schemes=None
+                ):
+                myfile = input_file
+                if isinstance(input_file,basestring):
+                    myfile = open(input_file, "r")
+                self.conn = conn
+                self.cont = cont
+                ldif.LDIFParser.__init__(self,myfile,ignored_attr_types,max_entries,process_url_schemes)
+                self.parse()
+                if isinstance(input_file,basestring):
+                    myfile.close()
+
+            def handle(self,dn,entry):
+                if not dn:
+                    dn = ''
+                newentry = Entry((dn, entry))
+                try: self.conn.add_s(newentry)
+                except ldap.LDAPError, e:
+                    if not self.cont: raise e
+                    print "Error: could not add entry %s: error %s" % (dn, str(e))
+
+        adder = LDIFAdder(file, self, cont)        
+
     def setupBackend(self,suffix,binddn=None,bindpw=None,urls=[],attrvals={}):
-        ldbmdn = "cn=ldbm database, cn=plugins, cn=config"
-        chaindn = "cn=chaining database, cn=plugins, cn=config"
+        ldbmdn = "cn=ldbm database,cn=plugins,cn=config"
+        chaindn = "cn=chaining database,cn=plugins,cn=config"
         dnbase = ""
         benamebase = ""
         # figure out what type of be based on args
@@ -526,7 +706,7 @@ class DSAdmin(SimpleLDAPObject):
         while not done:
             try:
                 cn = benamebase + str(benum) # e.g. localdb1
-                dn = "cn=" + cn + ", " + dnbase
+                dn = "cn=" + cn + "," + dnbase
                 entry = Entry(dn)
                 entry.setValues('objectclass', 'top', 'extensibleObject', 'nsBackendInstance')
                 entry.setValues('cn', cn)
@@ -564,20 +744,25 @@ class DSAdmin(SimpleLDAPObject):
         rc = 0
         nsuffix = DSAdmin.normalizeDN(suffix)
         nparent = ""
-        if parent: nparent = DSAdmin.normalizeDN(parent)
-        dn = "cn=\"%s\", cn=mapping tree, cn=config" % nsuffix
+        if parent:
+            nparent = DSAdmin.normalizeDN(parent)
+            escapeparentdn = DSAdmin.escapeDNValue(nparent)
+        spacesuffix = DSAdmin.normalizeDN(suffix, True)
+        escapedn = DSAdmin.escapeDNValue(nsuffix)
+        escapequoteddn = DSAdmin.escapeDNValue('"' + nsuffix + '"')
+        escapequotedspacedn = DSAdmin.escapeDNValue('"' + spacesuffix + '"')
         try:
-            entry = self.getEntry("cn=mapping tree, cn=config", ldap.SCOPE_SUBTREE,
-                                  "(|(cn=\"%s\")(cn=\"%s\"))" % (suffix,nsuffix))
+            entry = self.getEntry("cn=mapping tree,cn=config", ldap.SCOPE_SUBTREE,
+                                  "(|(cn=%s)(cn=%s))" % (escapequoteddn,escapequotedspacedn))
         except NoSuchEntryError: entry = None
         if not entry:
-            dn = "cn=\"%s\", cn=mapping tree, cn=config" % nsuffix
+            dn = "cn=%s,cn=mapping tree,cn=config" % escapedn
             entry = Entry(dn)
             entry.setValues('objectclass', 'top', 'extensibleObject', 'nsMappingTree')
-            entry.setValues('cn', "\"%s\"" % nsuffix)
+            entry.setValues('cn', escapedn)
             entry.setValues('nsslapd-state', 'backend')
             entry.setValues('nsslapd-backend', bename)
-            if parent: entry.setValues('nsslapd-parent-suffix', "\"%s\"" % nparent)
+            if parent: entry.setValues('nsslapd-parent-suffix', escapeparentdn)
             try:
                 self.add_s(entry)
                 entry = self.getEntry(dn, ldap.SCOPE_BASE)
@@ -586,7 +771,7 @@ class DSAdmin(SimpleLDAPObject):
                     rc = -1
                 else:
                     print entry
-            except LDAPError, e:
+            except ldap.LDAPError, e:
                 print "Error adding suffix entry " + dn, e
                 raise
         else:
@@ -599,9 +784,13 @@ class DSAdmin(SimpleLDAPObject):
         """Given a suffix, return the mapping tree entry for it.  If attrs is
         given, only fetch those attributes, otherwise, get all attributes."""
         nsuffix = DSAdmin.normalizeDN(suffix)
+        spacesuffix = DSAdmin.normalizeDN(suffix, True)
+        escapequoteddn = DSAdmin.escapeDNValue('"' + nsuffix + '"')
+        escapequotedspacedn = DSAdmin.escapeDNValue('"' + spacesuffix + '"')
+        entry = None
         try:
             entry = self.getEntry("cn=mapping tree,cn=config", ldap.SCOPE_ONELEVEL,
-                                  "(|(cn=\"%s\")(cn=\"%s\"))" % (suffix,nsuffix),
+                                  "(|(cn=%s)(cn=%s))" % (escapequoteddn,escapequotedspacedn),
                                   attrs)
         except NoSuchEntryError: pass
         return entry        
@@ -622,7 +811,7 @@ class DSAdmin(SimpleLDAPObject):
                                   "(&(objectclass=nsBackendInstance)(cn=%s))" % bename,
                                   ['nsslapd-suffix'])
         except NoSuchEntryError:
-            print "Could not find and entry for backend", bename
+            print "Could not find an entry for backend", bename
         if entry:
             suffix = entry.getValue('nsslapd-suffix')
             return self.getMTEntry(suffix, attrs)
@@ -631,27 +820,15 @@ class DSAdmin(SimpleLDAPObject):
     # see if the given suffix has a parent suffix
     def findParentSuffix(self, suffix):
         rdns = ldap.explode_dn(suffix)
-        nsuffix = DSAdmin.normalizeDN(suffix)
-        nrdns = ldap.explode_dn(nsuffix)
         del rdns[0]
-        del nrdns[0]
-        if len(rdns) == 0:
-            return ""
 
         while len(rdns) > 0:
             suffix = ','.join(rdns)
-            nsuffix = ','.join(nrdns)
-            mapent = None
-            try:
-                mapent = self.getEntry('cn=mapping tree, cn=config', ldap.SCOPE_SUBTREE,
-                                       "(|(cn=\"%s\")(cn=\"%s\"))" % (suffix,nsuffix),
-                                       ['cn'])
-            except NoSuchEntryError: pass
+            mapent = self.getMTEntry(suffix)
             if mapent:
                 return suffix
             else:
                 del rdns[0]
-                del nrdns[0]
 
         return ""
 
@@ -735,6 +912,14 @@ class DSAdmin(SimpleLDAPObject):
         except ldap.ALREADY_EXISTS:
             print "Index for attr %s for backend %s already exists" % (attr, dn)
 
+    def modIndex(self, suffix, attr, mod):
+        """just a wrapper around a plain old ldap modify, but will
+        find the correct index entry based on the suffix and attribute"""
+        beents = self.getBackendsForSuffix(suffix, ['cn'])
+        # assume 1 local backend
+        dn = "cn=%s,cn=index,%s" % (attr, beents[0].dn)
+        self.modify_s(dn, mod)
+
     def requireIndex(self, suffix):
         beents = self.getBackendsForSuffix(suffix, ['cn'])
         # assume 1 local backend
@@ -801,7 +986,7 @@ class DSAdmin(SimpleLDAPObject):
         self.setupChainingMux(suffix, isIntermediate, binddn, bindpw, to.toLDAPURL());
 
     def setupChangelog(self, dirpath=''):
-        dn = "cn=changelog5, cn=config"
+        dn = "cn=changelog5,cn=config"
         dirpath = dirpath or self.dbdir + "/cldb"
         entry = Entry(dn)
         entry.setValues('objectclass', "top", "extensibleobject")
@@ -861,12 +1046,12 @@ class DSAdmin(SimpleLDAPObject):
     # if replica ID is not given, an internal sequence number will be assigned
     # call like this:
     # conn.setupReplica({
-    #        'suffix': "dc=mcom, dc=com",
+    #        'suffix': "dc=example,dc=com",
     #        'type'  : dsadmin.MASTER_TYPE,
-    #        'binddn': "cn=replication manager, cn=config"
+    #        'binddn': "cn=replication manager,cn=config"
     #  })
     # binddn can also be a list:
-    #    'binddn': [ "cn=repl1, cn=config", "cn=repl2, cn=config" ]
+    #    'binddn': [ "cn=repl1,cn=config", "cn=repl2,cn=config" ]
     def setupReplica(self, args):
         global REPLICAID # declared here because we may assign to it
         suffix = args['suffix']
@@ -875,7 +1060,11 @@ class DSAdmin(SimpleLDAPObject):
         binddn = args['binddn']
         id = args.get('id', None)
         nsuffix = DSAdmin.normalizeDN(suffix)
-        dn = "cn=replica, cn=\"%s\", cn=mapping tree, cn=config" % nsuffix
+        mtent = self.getMTEntry(suffix)
+        if not mtent:
+            print "Error: no such suffix:", suffix
+            return -1
+        dn = "cn=replica," + mtent.dn
         try:
             entry = self.getEntry(dn, ldap.SCOPE_BASE)
         except ldap.NO_SUCH_OBJECT: entry = None
@@ -1007,7 +1196,7 @@ class DSAdmin(SimpleLDAPObject):
         othhost, othport, othsslport = (repoth.host, repoth.port, repoth.sslport)
         othport = othsslport or othport
         cn = "meTo%s%d" % (othhost,othport)
-        dn = "cn=%s, %s" % (cn,self.suffixes[nsuffix]['dn'])
+        dn = "cn=%s,%s" % (cn,self.suffixes[nsuffix]['dn'])
         try:
             entry = self.getEntry(dn, ldap.SCOPE_BASE)
         except ldap.NO_SUCH_OBJECT: entry = None
@@ -1016,6 +1205,10 @@ class DSAdmin(SimpleLDAPObject):
             print entry
             self.suffixes[nsuffix] = {}
             self.suffixes[nsuffix][str(repoth)] = dn
+            return dn
+        if repoth in self.agmt:
+            print "Agreement exists:"
+            print self.agmt[repoth]
             return dn
 
         entry = Entry(dn)
@@ -1060,6 +1253,7 @@ class DSAdmin(SimpleLDAPObject):
                 repoth.setupConsumerChainOnUpdate(suffix, 0, binddn, bindpw, self.toLDAPURL())
             elif chain and repoth.suffixes[nsuffix]['type'] == HUB_TYPE:
                 repoth.setupConsumerChainOnUpdate(suffix, 1, binddn, bindpw, self.toLDAPURL())
+        self.agmt[repoth] = dn
         return dn
 
     def stopReplication(self, agmtdn):
@@ -1109,6 +1303,17 @@ class DSAdmin(SimpleLDAPObject):
 
         return ""
 
+    def getChangesSent(self,agmtdn):
+        ent = self.getEntry(agmtdn, ldap.SCOPE_BASE, "(objectclass=*)",
+                            ['nsds5replicaChangesSentSinceStartup'])
+        retval = 0
+        if not ent:
+            print "Error reading status from agreement", agmtdn
+        elif ent.nsds5replicaChangesSentSinceStartup:
+            val = ent.nsds5replicaChangesSentSinceStartup
+            retval = int(val.split(":")[1].split("/")[0])
+        return retval
+        
     def startReplication_async(self, agmtdn):
         mod = [(ldap.MOD_ADD, 'nsds5BeginReplicaRefresh', 'start')]
         self.modify_s(agmtdn, mod)
@@ -1257,15 +1462,44 @@ class DSAdmin(SimpleLDAPObject):
         self.stop()
         self.start(True)
 
+    def getRUV(self, suffix, tryrepl=False, verbose=False):
+        uuid = "ffffffff-ffffffff-ffffffff-ffffffff"
+        filt = "(&(nsUniqueID=%s)(objectclass=nsTombstone))" % uuid
+        attrs = ['nsds50ruv', 'nsruvReplicaLastModified'];
+        ents = self.search_s(suffix, ldap.SCOPE_SUBTREE, filt, attrs)
+        ent = None
+        if ents and (len(ents) > 0): ent = ents[0]
+        elif tryrepl:
+            print "Could not get RUV from", suffix, "entry - trying cn=replica"
+            ensuffix = escapeDNValue(normalizeDN(suffix))
+            dn = "cn=replica,cn=%s,cn=mapping tree,cn=config" % ensuffix
+            ents = self.search_s(dn, ldap.SCOPE_BASE, "objectclass=*", attrs)
+        if ents and (len(ents) > 0): ent = ents[0]
+        else:
+            print "Could not read RUV for", suffix
+            return None
+        return RUV(ent) 
+
     ###########################
     # Static methods start here
     ###########################
-    def normalizeDN(dn):
+    def normalizeDN(dn,usespace=False):
         # not great, but will do until we use a newer version of python-ldap
         # that has DN utilities
         ary = ldap.explode_dn(dn.lower())
-        return ",".join(ary)
+        joinstr = ","
+        if usespace: joinstr = ", "
+        return joinstr.join(ary)
     normalizeDN = staticmethod(normalizeDN)
+
+    def escapeDNValue(dn):
+        '''convert special characters in a DN into LDAPv3 escapes e.g.
+        "dc=example,dc=com" -> \22dc\3dexample\2c dc\3dcom\22'''
+        dn = dn.replace('"', r'\22')
+        dn = dn.replace('=', r'\3D')
+        dn = dn.replace(',', r'\2C')
+        return dn
+    escapeDNValue = staticmethod(escapeDNValue)
 
     def isLocalHost(hname):
         # first see if this is a "well known" local hostname
@@ -1313,7 +1547,7 @@ class DSAdmin(SimpleLDAPObject):
     def getdefaultsuffix(name=''):
         dm = DSAdmin.getdomainname(name)
         if dm:
-            return "dc=" + dm.replace('.', ', dc=')
+            return "dc=" + dm.replace('.', ',dc=')
         else:
             return 'dc=localdomain'
     getdefaultsuffix = staticmethod(getdefaultsuffix)
@@ -1408,7 +1642,7 @@ class DSAdmin(SimpleLDAPObject):
             elif args.has_key('admconf'):
                 args['cfgdsuser'] = args['admconf'].userdn
             elif args.has_key('cfgdsuser'):
-                args['cfgdsuser'] = "uid=%s, ou=Administrators, ou=TopologyManagement, %s" % \
+                args['cfgdsuser'] = "uid=%s,ou=Administrators,ou=TopologyManagement,%s" % \
                 	(args['cfgdsuser'], cfgdn)
             conn.unbind()
             conn = DSAdmin(args['cfgdshost'], args['cfgdsport'], args['cfgdsuser'],
@@ -1450,7 +1684,7 @@ class DSAdmin(SimpleLDAPObject):
         if cfgconn:
             dn = cfgdn
             if args.has_key('admin_domain'):
-                dn = "cn=%s, ou=%s, %s" % (args['newhost'], args['admin_domain'], cfgdn)
+                dn = "cn=%s,ou=%s, %s" % (args['newhost'], args['admin_domain'], cfgdn)
             filter = "(&(objectclass=nsAdminServer)(serverHostName=%s)" % args['newhost']
             if args.has_key('sroot'):
                 filter += "(serverRoot=%s)" % args['sroot']
@@ -1488,7 +1722,7 @@ class DSAdmin(SimpleLDAPObject):
         if not args.has_key('newuserid'):
             args['newuserid'] = os.environ['LOGNAME']
             if args['newuserid'] == 'root':
-                args['newuserid'] = DEFAULT_USER_ID
+                args['newuserid'] = DSAdmin.DEFAULT_USER_ID
     getserveruid = staticmethod(getserveruid)
 
     def cgiFake(sroot,verbose,prog,args):
@@ -1559,6 +1793,9 @@ ConfigFile= %s
                 content = content + """
 SchemaFile= %s
 """ % ff
+
+        if args.has_key('ldapifilepath'):
+            content = content + "ldapifilepath= " + args['ldapifilepath'] + "\n"
 
         return content
     formatInfData = staticmethod(formatInfData)

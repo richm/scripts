@@ -3442,3 +3442,372 @@
    fun:ldbm_back_ldif2ldbm
    fun:main
 }
+{
+   /var/tmp/slapd.vg.11122.11126:Conditional jump or move depends on uninitialised value(s)
+   Memcheck:Cond
+   obj:*/libnss3.so
+   obj:*/libnss3.so
+   obj:*/libnss3.so
+   fun:slapd_pk11_setSlotPWValues
+   fun:slapd_ssl_init2
+}
+{
+   /var/tmp/slapd.vg.11122.11126:Conditional jump or move depends on uninitialised value(s)
+   Memcheck:Cond
+   obj:*/libnss3.so
+   obj:*/libnss3.so
+   obj:*/libnss3.so
+   fun:SECMOD_UpdateModule
+   fun:slapd_pk11_setSlotPWValues
+   fun:slapd_ssl_init2
+}
+{
+   /var/tmp/slapd.vg.11122.11126:Memory leak: 3 bytes
+   Memcheck:Leak
+   fun:malloc
+   fun:slapi_ch_malloc
+   fun:slapi_entry_attr_get_charptr
+   fun:plugin_setup
+   fun:slapi_register_plugin_ext
+   fun:slapi_register_plugin
+   fun:replication_multimaster_plugin_init
+   fun:plugin_setup
+}
+{
+   /var/tmp/slapd.vg.11122.11126:Memory leak: 3 bytes
+   Memcheck:Leak
+   fun:malloc
+   fun:slapi_ch_malloc
+   fun:slapi_entry_attr_get_charptr
+   fun:plugin_setup
+   fun:slapi_register_plugin_ext
+   fun:slapi_register_plugin
+   fun:replication_legacy_plugin_init
+   fun:plugin_setup
+}
+{
+   /var/tmp/slapd.vg.11122.11126:Memory leak: 3 bytes
+   Memcheck:Leak
+   fun:malloc
+   fun:slapi_ch_malloc
+   fun:slapi_entry_attr_get_charptr
+   fun:plugin_setup
+   fun:slapi_register_plugin_ext
+   fun:slapi_register_plugin
+   fun:dna_init
+   fun:plugin_setup
+}
+{
+   /var/tmp/slapd.vg.11122.11126:Memory leak: 3 bytes
+   Memcheck:Leak
+   fun:malloc
+   fun:slapi_ch_malloc
+   fun:slapi_entry_attr_get_charptr
+   fun:plugin_setup
+   fun:slapi_register_plugin_ext
+   fun:retrocl_plugin_init
+   fun:plugin_setup
+}
+{
+   /var/tmp/slapd.vg.11122.11126:Memory leak: 3 bytes
+   Memcheck:Leak
+   fun:malloc
+   fun:slapi_ch_malloc
+   fun:slapi_entry_attr_get_charptr
+   fun:plugin_setup
+   fun:slapi_register_plugin_ext
+   fun:slapi_register_plugin
+   fun:linked_attrs_init
+   fun:plugin_setup
+}
+{
+   /var/tmp/slapd.vg.11122.11126:Memory leak: 3 bytes
+   Memcheck:Leak
+   fun:malloc
+   fun:slapi_ch_malloc
+   fun:slapi_entry_attr_get_charptr
+   fun:plugin_setup
+   fun:slapi_register_plugin_ext
+   fun:slapi_register_plugin
+   fun:cos_init
+   fun:plugin_setup
+}
+{
+   /var/tmp/slapd.vg.11122.11126:Memory leak: 3 bytes
+   Memcheck:Leak
+   fun:malloc
+   fun:slapi_ch_malloc
+   fun:slapi_entry_attr_get_charptr
+   fun:plugin_setup
+   fun:slapi_register_plugin_ext
+   fun:slapi_register_plugin
+   fun:replication_multimaster_plugin_init
+   fun:plugin_setup
+}
+{
+   /var/tmp/slapd.vg.11122.11126:Memory leak: 45 bytes
+   Memcheck:Leak
+   fun:malloc
+   fun:strdup
+   fun:slapi_ch_strdup
+   fun:config_get_ldapi_filename
+   fun:main
+}
+{
+   /var/tmp/slapd.vg.11122.11126:Memory leak: 45 bytes
+   Memcheck:Leak
+   fun:malloc
+   fun:strdup
+   fun:slapi_ch_strdup
+   fun:config_get_ldapi_filename
+   fun:main
+}
+{
+   /var/tmp/slapd.vg.11122.11126:Memory leak: 3 bytes
+   Memcheck:Leak
+   fun:malloc
+   fun:slapi_ch_malloc
+   fun:slapi_entry_attr_get_charptr
+   fun:plugin_setup
+   fun:slapi_register_plugin_ext
+   fun:slapi_register_plugin
+   fun:roles_init
+   fun:plugin_setup
+}
+{
+   /var/tmp/slapd.vg.11122.11126:Memory leak: 3 bytes
+   Memcheck:Leak
+   fun:malloc
+   fun:slapi_ch_malloc
+   fun:slapi_entry_attr_get_charptr
+   fun:plugin_setup
+}
+{
+   /var/tmp/slapd.vg.11122.11126:Memory leak: 3 bytes
+   Memcheck:Leak
+   fun:malloc
+   fun:slapi_ch_malloc
+   fun:slapi_entry_attr_get_charptr
+   fun:plugin_setup
+   fun:slapi_register_plugin_ext
+   fun:slapi_register_plugin
+   fun:roles_init
+   fun:plugin_setup
+}
+{
+   var/tmp/cluSearch.vg.2301:Syscall param pwrite64(buf) points to uninitialised byte(s)
+   Memcheck:Param
+   pwrite64(buf)
+   fun:pwrite64
+   fun:__os_io
+   obj:*/libdb-4.*.so
+   fun:__memp_bhwrite
+   fun:__memp_sync_int
+   fun:__memp_fsync
+   fun:__db_sync
+   fun:__db_refresh
+   fun:__db_close
+   fun:__db_close_pp
+   fun:dblayer_close_indexes
+}
+{
+   var/tmp/import.vg.15690:Syscall param pwrite64(buf) points to uninitialised byte(s)
+   Memcheck:Param
+   pwrite64(buf)
+   fun:pwrite64
+   fun:__os_io
+   obj:*/libdb-4.*.so
+   fun:__memp_bhwrite
+   fun:__memp_sync_int
+   fun:__memp_fsync
+   fun:__db_sync
+   fun:__db_refresh
+   fun:__db_close
+   fun:__db_close_pp
+   fun:dblayer_close_indexes
+}
+{
+   var/tmp/cluUtil.vg.14756:Syscall param pwrite64(buf) points to uninitialised byte(s)
+   Memcheck:Param
+   pwrite64(buf)
+   fun:pwrite64
+   fun:__os_io
+   obj:*/libdb-4.*.so
+   fun:__memp_bhwrite
+   fun:__memp_sync_int
+   fun:__memp_fsync
+   fun:__db_sync
+   fun:__db_refresh
+   fun:__db_close
+   fun:__db_close_pp
+   fun:dblayer_close_indexes
+}
+{
+   var/tmp/simplepaged.vg.21833:Syscall param pwrite64(buf) points to uninitialised byte(s)
+   Memcheck:Param
+   pwrite64(buf)
+   fun:pwrite64
+   fun:__os_io
+   obj:*/libdb-4.*.so
+   fun:__memp_bhwrite
+   fun:__memp_sync_int
+   fun:__txn_checkpoint
+   fun:__txn_checkpoint_pp
+   fun:dblayer_txn_checkpoint
+}
+{
+   var/tmp/simplepaged.vg.21833:Syscall param pwrite64(buf) points to uninitialised byte(s)
+   Memcheck:Param
+   pwrite64(buf)
+   fun:pwrite64
+   fun:__os_io
+   obj:*/libdb-4.*.so
+   fun:__log_flush_int
+   fun:__log_put
+   fun:__txn_regop_log
+   fun:__txn_commit
+   obj:*/libdb-4.*.so
+   fun:dblayer_txn_commit_ext
+}
+{
+   var/tmp/simplepaged.vg.21833:Conditional jump or move depends on uninitialised value(s)
+   Memcheck:Cond
+   obj:*/libdb-4.*.so
+   fun:__log_put
+   fun:__bam_split_log
+   fun:__bam_split
+   obj:*/libdb-4.*.so
+   fun:__dbc_put
+   fun:__dbc_put_pp
+   fun:_entryrdn_put_data
+}
+{
+   var/tmp/simplepaged.vg.21833:Conditional jump or move depends on uninitialised value(s)
+   Memcheck:Cond
+   obj:*/libdb-4.*.so
+   fun:__log_put
+   fun:__db_addrem_log
+   fun:__db_ditem
+   fun:__bam_ditem
+   obj:*/libdb-4.*.so
+   obj:*/libdb-4.*.so
+   fun:__dbc_close
+   obj:*/libdb-4.*.so
+   fun:__dbc_get
+   fun:__dbc_get_pp
+   fun:_entryrdn_get_elem
+}
+{
+   var/tmp/simplepaged.vg.21833:Conditional jump or move depends on uninitialised value(s)
+   Memcheck:Cond
+   obj:*/libdb-4.*.so
+   fun:__log_put
+   fun:__bam_split_log
+   fun:__bam_split
+   obj:*/libdb-4.*.so
+   fun:__dbc_put
+   fun:__dbc_put_pp
+   fun:_entryrdn_put_data
+}
+{
+   var/tmp/simplepaged.vg.21833:Conditional jump or move depends on uninitialised value(s)
+   Memcheck:Cond
+   obj:*/libdb-4.*.so
+   fun:__log_put
+   fun:__db_addrem_log
+   fun:__db_pitem
+   fun:__bam_iitem
+   obj:*/libdb-4.*.so
+   fun:__dbc_put
+   fun:__dbc_put_pp
+   fun:_entryrdn_put_data
+}
+{
+   var/tmp/acceptance.vg.31718:Memory leak: 231 bytes
+   Memcheck:Leak
+   fun:*alloc
+   fun:slapi_ch_malloc
+   fun:slapi_entry_attr_get_charptr
+   fun:plugin_dependency_startall.clone.0
+}
+{
+   var/tmp/acceptance.vg.31718:Memory leak: 224 bytes
+   Memcheck:Leak
+   fun:*alloc
+   fun:slapi_ch_malloc
+   fun:plugin_dependency_startall.clone.0
+}
+{
+   var/tmp/acceptance.vg.31718:Memory leak: 108 bytes
+   Memcheck:Leak
+   fun:*alloc
+   fun:slapi_ch_malloc
+   fun:slapi_entry_attr_get_charptr
+   fun:plugin_dependency_startall.clone.0
+}
+{
+   var/tmp/acceptance.vg.31718:Memory leak: 4 bytes
+   Memcheck:Leak
+   fun:*alloc
+   fun:slapi_ch_malloc
+   fun:plugin_create_stringlist
+   fun:plugin_dependency_startall.clone.0
+}
+{
+   var/tmp/cluUtil.vg.14756:Memory leak: 20025 bytes
+   Memcheck:Leak
+   fun:*alloc
+   fun:slapi_ch_malloc
+   fun:operation_new
+   fun:internal_operation_new
+   fun:plugin_dependency_startall.clone.0
+}
+{
+   var/tmp/simplepaged.vg.21833:Memory leak: 20023 bytes
+   Memcheck:Leak
+   fun:*alloc
+   fun:slapi_ch_malloc
+   fun:operation_new
+   fun:internal_operation_new
+   fun:plugin_dependency_startall.clone.0
+}
+{
+   var/tmp/import.vg.8072:Memory leak: 20017 bytes
+   Memcheck:Leak
+   fun:*alloc
+   fun:slapi_ch_malloc
+   fun:operation_new
+   fun:internal_operation_new
+   fun:plugin_dependency_startall.clone.0
+}
+{
+   var/tmp/acceptance.vg.31718:Memory leak: 20014 bytes
+   Memcheck:Leak
+   fun:*alloc
+   fun:slapi_ch_malloc
+   fun:operation_new
+   fun:internal_operation_new
+   fun:plugin_dependency_startall.clone.0
+}
+{
+   var/tmp/acceptance.vg.32520:Memory leak: 20010 bytes
+   Memcheck:Leak
+   fun:*alloc
+   fun:slapi_ch_malloc
+   fun:operation_new
+   fun:internal_operation_new
+   fun:plugin_dependency_startall.clone.0
+}
+{
+   var/tmp/fractional.vg.10846:Conditional jump or move depends on uninitialised value(s)
+   Memcheck:Cond
+   obj:*/libdb-4.*.so
+   fun:__log_put
+   fun:__db_addrem_log
+   fun:__db_ditem
+   fun:__bam_iitem
+   obj:*/libdb-4.*.so
+   fun:__dbc_put
+   fun:__dbc_put_pp
+   fun:_entryrdn_put_data
+}
