@@ -50,8 +50,12 @@ class Entry:
         If creating a new empty entry, data is the string DN."""
         if entrydata:
             if isinstance(entrydata,tuple):
-                self.dn = entrydata[0]
-                self.data = ldap.cidict.cidict(entrydata[1])
+                if not entrydata[0]:
+                    print "skipping non-entry data"
+                    pprint.pprint(entrydata)
+                else:
+                    self.dn = entrydata[0]
+                    self.data = ldap.cidict.cidict(entrydata[1])
             elif isinstance(entrydata,basestring):
                 self.dn = entrydata
                 self.data = ldap.cidict.cidict()
@@ -76,6 +80,7 @@ class Entry:
         entry.getValue('cn')
         This also allows us to return None if an attribute is not found rather than
         throwing an exception"""
+        if name == 'dn' or name == 'data': return self.__dict__.get(name, None)
         return self.getValue(name)
 
     def getValues(self,name):
@@ -707,6 +712,7 @@ class DSAdmin(SimpleLDAPObject):
         chaindn = "cn=chaining database,cn=plugins,cn=config"
         dnbase = ""
         benamebase = ""
+        verbose = False
         # figure out what type of be based on args
         if binddn and bindpw and urls: # its a chaining be
             benamebase = "chaindb"
@@ -738,7 +744,7 @@ class DSAdmin(SimpleLDAPObject):
                     for attr,val in attrvals.items():
                         print "adding %s = %s to entry %s" % (attr,val,dn)
                         entry.setValues(attr, val)
-                print entry
+                if verbose: print entry
                 self.add_s(entry)
                 done = True
             except ldap.ALREADY_EXISTS:
@@ -746,68 +752,69 @@ class DSAdmin(SimpleLDAPObject):
             except ldap.LDAPError, e:
                 print "Could not add backend entry " + dn, e
                 raise
-        entry = self.getEntry(dn, ldap.SCOPE_BASE)
-        if not entry:
-            print "Backend entry added, but could not be searched"
-        else:
-            print entry
-            return cn
-
-        return ""
+        if verbose:
+            entry = self.getEntry(dn, ldap.SCOPE_BASE)
+            if not entry:
+                print "Backend entry added, but could not be searched"
+                return ""
+            else:
+                print entry
+        return cn
 
     def setupSuffix(self,suffix,bename,parent=""):
         rc = 0
+        verbose = False
         nsuffix = DSAdmin.normalizeDN(suffix)
+        escapedn = DSAdmin.escapeDNValue(nsuffix)
         nparent = ""
         if parent:
             nparent = DSAdmin.normalizeDN(parent)
-            escapeparentdn = DSAdmin.escapeDNValue(nparent)
-        spacesuffix = DSAdmin.normalizeDN(suffix, True)
-        escapedn = DSAdmin.escapeDNValue(nsuffix)
-        escapequoteddn = DSAdmin.escapeDNValue('"' + nsuffix + '"')
-        escapequotedspacedn = DSAdmin.escapeDNValue('"' + spacesuffix + '"')
+        filt = DSAdmin.suffixfilt(suffix)
         try:
-            entry = self.getEntry("cn=mapping tree,cn=config", ldap.SCOPE_SUBTREE,
-                                  "(|(cn=%s)(cn=%s))" % (escapequoteddn,escapequotedspacedn))
+            entry = self.getEntry("cn=mapping tree,cn=config", ldap.SCOPE_SUBTREE, filt)
         except NoSuchEntryError: entry = None
         if not entry:
-            dn = "cn=%s,cn=mapping tree,cn=config" % escapedn
+            # fix me when we can actually used escaped DNs
+            #dn = "cn=%s,cn=mapping tree,cn=config" % escapedn
+            dn = 'cn="%s",cn=mapping tree,cn=config' % nsuffix
             entry = Entry(dn)
             entry.setValues('objectclass', 'top', 'extensibleObject', 'nsMappingTree')
-            entry.setValues('cn', escapedn)
+            #entry.setValues('cn', [escapedn, nsuffix]) # the value in the dn has to be DN escaped
+            # the other value can be the unescaped value
+            entry.setValues('cn', nsuffix) # internal code will add the quoted value - unquoted value is useful for searching
             entry.setValues('nsslapd-state', 'backend')
             entry.setValues('nsslapd-backend', bename)
-            if parent: entry.setValues('nsslapd-parent-suffix', escapeparentdn)
+            if parent: entry.setValues('nsslapd-parent-suffix', nparent)
             try:
                 self.add_s(entry)
-                entry = self.getEntry(dn, ldap.SCOPE_BASE)
-                if not entry:
-                    print "Entry %s was added successfully, but I cannot search it" % dn
-                    rc = -1
-                else:
-                    print entry
+                if verbose:
+                    entry = self.getEntry(dn, ldap.SCOPE_BASE)
+                    if not entry:
+                        print "Entry %s was added successfully, but I cannot search it" % dn
+                        rc = -1
+                    else:
+                        print entry
             except ldap.LDAPError, e:
                 print "Error adding suffix entry " + dn, e
                 raise
         else:
-            print "Suffix entry already exists:"
-            print entry
+            if verbose:
+                print "Suffix entry already exists:"
+                print entry
 
         return rc
 
     def getMTEntry(self, suffix, attrs=[]):
         """Given a suffix, return the mapping tree entry for it.  If attrs is
         given, only fetch those attributes, otherwise, get all attributes."""
-        nsuffix = DSAdmin.normalizeDN(suffix)
-        spacesuffix = DSAdmin.normalizeDN(suffix, True)
-        escapequoteddn = DSAdmin.escapeDNValue('"' + nsuffix + '"')
-        escapequotedspacedn = DSAdmin.escapeDNValue('"' + spacesuffix + '"')
+        filt = DSAdmin.suffixfilt(suffix)
         entry = None
         try:
-            entry = self.getEntry("cn=mapping tree,cn=config", ldap.SCOPE_ONELEVEL,
-                                  "(|(cn=%s)(cn=%s))" % (escapequoteddn,escapequotedspacedn),
-                                  attrs)
+            entry = self.getEntry("cn=mapping tree,cn=config", ldap.SCOPE_ONELEVEL, filt, attrs)
         except NoSuchEntryError: pass
+        except ldap.FILTER_ERROR, e:
+            print "Error searching for", filt
+            raise e
         return entry        
 
     def getBackendsForSuffix(self,suffix, attrs=[]):
@@ -1129,9 +1136,9 @@ class DSAdmin(SimpleLDAPObject):
         entry.setValues('nsds5replicabinddn', binddnlist)
         entry.setValues('nsds5replicalegacyconsumer', legacyval)
         if args.has_key('tpi'):
-            entry.setValues('nsds5replicatombstonepurgeinterval', args['tpi'])
+            entry.setValues('nsds5replicatombstonepurgeinterval', str(args['tpi']))
         if args.has_key('pd'):
-            entry.setValues('nsds5ReplicaPurgeDelay', args['pd'])
+            entry.setValues('nsds5ReplicaPurgeDelay', str(args['pd']))
         if args.has_key('referrals'):
             entry.setValues('nsds5ReplicaReferral', args['referrals'])
         if args.has_key('fractional'):
@@ -1509,12 +1516,27 @@ class DSAdmin(SimpleLDAPObject):
 
     def escapeDNValue(dn):
         '''convert special characters in a DN into LDAPv3 escapes e.g.
-        "dc=example,dc=com" -> \22dc\3dexample\2c dc\3dcom\22'''
-        dn = dn.replace('"', r'\22')
-        dn = dn.replace('=', r'\3D')
-        dn = dn.replace(',', r'\2C')
+        "dc=example,dc=com" -> \"dc\=example\,\ dc\=com\"'''
+        for cc in (' ', '"', '+', ',', ';', '<', '>', '='):
+            dn = dn.replace(cc, '\\' + cc)
         return dn
     escapeDNValue = staticmethod(escapeDNValue)
+
+    def escapeDNFiltValue(dn):
+        '''convert special characters in a DN into LDAPv3 escapes
+        for use in search filters'''
+        for cc in (' ', '"', '+', ',', ';', '<', '>', '='):
+            dn = dn.replace(cc, '\\%x' % ord(cc))
+        return dn
+    escapeDNFiltValue = staticmethod(escapeDNFiltValue)
+
+    def suffixfilt(suffix):
+        nsuffix = DSAdmin.normalizeDN(suffix)
+        escapesuffix = DSAdmin.escapeDNFiltValue(nsuffix)
+        spacesuffix = DSAdmin.normalizeDN(nsuffix, True)
+        filt = '(|(cn=%s)(cn=%s)(cn=%s)(cn="%s")(cn="%s"))' % (escapesuffix, nsuffix, spacesuffix, nsuffix, spacesuffix)
+        return filt
+    suffixfilt = staticmethod(suffixfilt)
 
     def isLocalHost(hname):
         # first see if this is a "well known" local hostname
