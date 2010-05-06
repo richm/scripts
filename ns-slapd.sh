@@ -4,8 +4,13 @@ if [ ! "$NETSITE_ROOT" ] ; then
 	NETSITE_ROOT=`pwd | sed -e s@/bin/slapd/server@@g`
 fi
 
-#assumes
+export MALLOC_PERTURB_=$(($RANDOM % 255 + 1))
+export MALLOC_CHECK_=3
+
+# assumes you have renamed the original ns-slapd binary
+# to ns-slapd.orig
 SLAPD=$0.orig
+# assumes you have put the valgrind suppressions file in /tmp
 VGSUPPRESS="--suppressions=/tmp/valgrind.supp"
 # by default valgrind will demangle C++ symbols for you
 # but valgrind must have mangled symbols in suppression files
