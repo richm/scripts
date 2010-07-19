@@ -1420,9 +1420,6 @@ class DSAdmin(SimpleLDAPObject):
         if repArgs['type'] != LEAF_TYPE:
             self.setupChangelog()
         self.setupReplBindDN(repArgs.get('binddn'), repArgs.get('bindcn'), repArgs.get('bindpw'))
-        if repArgs.get('bindmethod', 'bogus') == 'SSLCLIENTAUTH':
-            mod = [(ldap.MOD_REPLACE, 'description', 'CN=localhost.localdomain,OU=Fedora Directory Server')]
-            self.modify_s(repArgs.get('binddn'), mod)
         self.setupReplica(repArgs)
         if repArgs.has_key('legacy'):
             self.setupLegacyConsumer(repArgs.get('binddn'), repArgs.get('bindpw'))
@@ -1438,7 +1435,7 @@ class DSAdmin(SimpleLDAPObject):
                 mods.append((ldap.MOD_REPLACE, attr, str(val)))
         self.modify_s(dn, mods)
 
-    def setupSSL(self,secport,sourcedir=None,secargs={}):
+    def setupSSL(self,secport=0,sourcedir=None,secargs={}):
         dn = 'cn=encryption,cn=config'
         mod = [(ldap.MOD_REPLACE, 'nsSSL3', secargs.get('nsSSL3', 'on')),
                (ldap.MOD_REPLACE, 'nsSSLClientAuth', secargs.get('nsSSLClientAuth', 'allowed')),
@@ -1479,6 +1476,11 @@ class DSAdmin(SimpleLDAPObject):
             shutil.copy(srcf, destf)
             if mode > 0: # reset mode
                 os.chmod(destf, mode)
+
+        # allow secport for selinux
+        if secport != 636:
+            cmd = 'semanage port -a -t ldap_port_t -p tcp ' + str(secport)
+            os.system(cmd)
 
         # now, restart the ds
         self.stop()
@@ -1820,6 +1822,10 @@ Suffix= %s
 """ % (args['newport'], args['newrootdn'], args['newrootpw'],
        args['newinst'], args['newsuffix'])
 
+        if args.has_key('InstallLdifFile'):
+            content = content + """
+InstallLdifFile= %s
+""" % args['InstallLdifFile']
         if args.has_key('ConfigFile'):
             for ff in args['ConfigFile']:
                 content = content + """
