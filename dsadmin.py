@@ -1982,14 +1982,6 @@ SchemaFile= %s
             if not args.has_key(param):
                 print "missing required argument", param
                 missing = True
-        if not isLocal or args.has_key('cfgdshost'):
-            for param in ('cfgdshost', 'cfgdsport', 'cfgdsuser', 'cfgdspwd', 'admin_domain'):
-                if not args.has_key(param):
-                    print "missing required argument", param
-                    missing = True
-        if not isLocal and not asport:
-            print "missing required argument admin server port"
-            missing = True
         if missing:
             raise InvalidArgumentError("missing required arguments")
 
@@ -2006,6 +1998,17 @@ SchemaFile= %s
             return newconn
         except ldap.SERVER_DOWN:
             pass # not running - create new one
+
+        if not isLocal or args.has_key('cfgdshost'):
+            for param in ('cfgdshost', 'cfgdsport', 'cfgdsuser', 'cfgdspwd', 'admin_domain'):
+                if not args.has_key(param):
+                    print "missing required argument", param
+                    missing = True
+        if not isLocal and not asport:
+            print "missing required argument admin server port"
+            missing = True
+        if missing:
+            raise InvalidArgumentError("missing required arguments")
 
         # construct a hash table with our CGI arguments - used with cgiPost
         # and cgiFake
