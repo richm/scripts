@@ -7,20 +7,19 @@ from dsadmin import DSAdmin, Entry
 from subprocess import Popen
 
 host1 = "localhost"
-if len(sys.argv) > 1:
-    host1 = sys.argv[1]
-
 port1 = 1210
-hostport = [(host1, port1)]
-host2 = host1
-port2 = port1 + 10
-hostport.append((host2, port2))
-host3 = host2
-port3 = port2 + 10
-hostport.append((host3, port3))
-host4 = host3
-port4 = port3 + 10
-hostport.append((host4, port4))
+hostport = [(host1, xx) for xx in range(port1, 1250, 10)]
+if len(sys.argv) > 1:
+    hostport = []
+    prevhost = ''
+    port = port1
+    for host in sys.argv[1:]:
+        if host == prevhost:
+            port += 10
+        else:
+            port = port1
+        prevhost = host
+        hostport.append((host, port))
 
 basedn = 'o=sasl.net'
 replbinddn = "cn=replrepl,cn=config"
@@ -138,3 +137,8 @@ while not uptodate:
     if not uptodate:
         print "not all servers are up-to-date - sleeping", waittime, "seconds . . ."
         time.sleep(waittime)
+
+print "all servers are up to date - compare entries"
+for srv in srvs:
+    ents = srv.search_s(basedn, ldap.SCOPE_SUBTREE)
+    print "server", str(srv), "has", len(ents), "entries"
