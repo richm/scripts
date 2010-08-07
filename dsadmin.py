@@ -1826,6 +1826,10 @@ Suffix= %s
             content = content + """
 InstallLdifFile= %s
 """ % args['InstallLdifFile']
+        if args.has_key('AddOrgEntries'):
+            content = content + """
+AddOrgEntries= %s
+""" % args['AddOrgEntries']
         if args.has_key('ConfigFile'):
             for ff in args['ConfigFile']:
                 content = content + """
