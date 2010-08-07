@@ -30,14 +30,15 @@ my $MOCKROOT = "/etc/mock";
 my @arches = ();
 my @distros = ();
 my @defines = ();
-my $suffix = "";
-my $localrepo = $ENV{HOME} . "/public_html/smock/yum";
+my $suffix = "-local";
+my $localrepo = "/share/repo";
 my $dryrun = 0;
 my $keepgoing = 0;
 my $chain = 0;
 my $help = 0;
 my $man = 0;
 my $definestr = "";
+my $overwrite = 0;
 
 GetOptions (
     "arch=s" => \@arches,
@@ -49,7 +50,8 @@ GetOptions (
     "chain" => \$chain,
     "help|?" => \$help,
     "man" => \$man,
-    "define=s" => \@defines
+    "define=s" => \@defines,
+    "overwrite" => \$overwrite
     ) or pod2usage (2);
 pod2usage (1) if $help;
 pod2usage (-exitstatus => 0, -verbose => 2) if $man;
@@ -122,6 +124,19 @@ Don't run any commands, just print the packages in the correct
 format for chain building.  See:
 L<http://fedoraproject.org/wiki/Koji/UsingKoji#Chained_builds>
 
+=item B<--man>
+
+Show this help using man.
+
+=item B<--overwrite>
+
+Overwrite existing files that are already in the repository. By default the
+build of an SRPM is skipped if there is already a package with the same name,
+version and release in the localrepo. With this option, the new build
+overwrites the old one. This may lead to unexpected results, if the new build
+does not create the same subpackages as the old one, because then the old
+subpackages will still be accessible in the repository.
+
 =item B<--suffix>
 
 Append a suffix to the mock configuration file in order to use
@@ -165,8 +180,8 @@ sub get_lines
     open PIPE, "$_[0] |" or die "$_[0]: $!";
     my @lines;
     foreach (<PIPE>) {
-	chomp;
-	push @lines, $_;
+        chomp;
+        push @lines, $_;
     }
     close PIPE;
     return @lines;
@@ -188,11 +203,11 @@ foreach my $srpm (@srpms) {
     #print "  buildrequires = ", join (",", @buildrequires), "\n";
 
     $srpms{$name} = {
-	name => $name,
-	version => $version,
-	release => $release,
-	buildrequires => \@buildrequires,
-	filename => $srpm
+        name => $name,
+        version => $version,
+        release => $release,
+        buildrequires => \@buildrequires,
+        filename => $srpm
     }
 }
 
@@ -204,21 +219,21 @@ sub is_member_of
     my $item = shift;
 
     foreach (@_) {
-	return 1 if $item eq $_;
+        return 1 if $item eq $_;
     }
     0;
 }
 
 sub dependency_in
 {
-    my $dep = shift;		# eg. dbus-devel
+    my $dep = shift;            # eg. dbus-devel
 
     while ($dep) {
-	return $dep if is_member_of ($dep, @_);
-	my $newdep = $dep;
-	$newdep =~ s/-\w+$//;	# eg. dbus-devel -> dbus
-	last if $newdep eq $dep;
-	$dep = $newdep;
+        return $dep if is_member_of ($dep, @_);
+        my $newdep = $dep;
+        $newdep =~ s/-\w+$//;   # eg. dbus-devel -> dbus
+        last if $newdep eq $dep;
+        $dep = $newdep;
     }
     0;
 }
@@ -226,7 +241,7 @@ sub dependency_in
 foreach my $name (keys %srpms) {
     my @buildrequires = @{$srpms{$name}->{buildrequires}};
     @buildrequires =
-	grep { $_ = dependency_in ($_, keys %srpms) } @buildrequires;
+        grep { $_ = dependency_in ($_, keys %srpms) } @buildrequires;
     $srpms{$name}{buildrequires} = \@buildrequires;
 }
 
@@ -241,14 +256,14 @@ sub tsort
     my ($fh, $filename) = tempfile ();
 
     foreach my $name (@names) {
-	my @buildrequires = @{$srpms{$name}->{buildrequires}};
-	foreach (@buildrequires) {
-	    print $fh "$_ $name\n"
-	}
-	# Add a self->self dependency.  This ensures that any
-	# packages which don't have or appear as a dependency of
-	# any other package still get built.
-	print $fh "$name $name\n"
+        my @buildrequires = @{$srpms{$name}->{buildrequires}};
+        foreach (@buildrequires) {
+            print $fh "$_ $name\n"
+        }
+        # Add a self->self dependency.  This ensures that any
+        # packages which don't have or appear as a dependency of
+        # any other package still get built.
+        print $fh "$name $name\n"
     }
     close $fh;
 
@@ -269,24 +284,24 @@ if ($chain) {
     print 'make chain-build CHAIN="';
 
     foreach $name (@buildorder) {
-	my @br = @{$srpms{$name}->{buildrequires}};
+        my @br = @{$srpms{$name}->{buildrequires}};
 
-	# If a BR occurs within the current group, then start the next group.
-	my $occurs = 0;
-	foreach (@br) {
-	    if (exists $group{$_}) {
-		$occurs = 1;
-		last;
-	    }
-	}
+        # If a BR occurs within the current group, then start the next group.
+        my $occurs = 0;
+        foreach (@br) {
+            if (exists $group{$_}) {
+                $occurs = 1;
+                last;
+            }
+        }
 
-	if ($occurs) {
-	    %group = ();
-	    print ": ";
-	}
+        if ($occurs) {
+            %group = ();
+            print ": ";
+        }
 
-	$group{$name} = 1;
-	print "$name ";
+        $group{$name} = 1;
+        print "$name ";
     }
     print "\"\n";
 
@@ -297,7 +312,7 @@ if ($chain) {
 
 if ($dryrun) {
     foreach (@buildorder) {
-	print "$_\n";
+        print "$_\n";
     }
 
     exit 0
@@ -310,7 +325,7 @@ sub my_mkdir
     local $_ = $_[0];
 
     if (! -d $_) {
-	mkdir ($_, 0755) or die "mkdir $_: $!"
+        mkdir ($_, 0755) or die "mkdir $_: $!"
     }
 }
 
@@ -323,7 +338,7 @@ sub createrepo
     my_mkdir "$localrepo/$distro/src";
     my_mkdir "$localrepo/$distro/src/SRPMS";
     system ("cd $localrepo/$distro/src && rm -rf repodata && createrepo -q .") == 0
-	or die "createrepo failed: $?\n";
+        or die "createrepo failed: $?\n";
 
     my_mkdir "$localrepo/$distro/$arch";
     my_mkdir "$localrepo/$distro/$arch/RPMS";
@@ -341,14 +356,17 @@ sub prepare_smock_cfg
     my $arch = shift;
     my $distro = shift;
     my $src = "$MOCKROOT/$distro-$arch.cfg";
-    my $dest = "$localrepo/$distro-$arch.cfg";
-    open(SRC, $src) or die "Error: could not open mock cfg file $src: $!";
-    open(DEST, ">$dest") or die "Error: could not write smock cfg file $dest: $!";
-    while (<SRC>) {
-	print DEST;
-    }
-    close SRC;
-    print DEST <<EOF;
+    my $dest = "$localrepo/$distro-$arch$suffix.cfg";
+
+    if (! -f $dest) {
+        print "Creating new repo file $dest\n";
+        open(SRC, $src) or die "Error: could not open mock cfg file $src: $!";
+        open(DEST, ">$dest") or die "Error: could not write smock cfg file $dest: $!";
+        while (<SRC>) {
+            print DEST;
+        }
+        close SRC;
+        print DEST <<EOF;
 config_opts['yum.conf'] = config_opts['yum.conf'] + """
 
 [smocklocal]
@@ -357,16 +375,21 @@ baseurl=file://$localrepo/$distro/$arch
 gpgcheck=0
 """
 EOF
-    close DEST;
+        close DEST;
+    }
+    if (! -f "$localrepo/site-defaults.cfg") {
+        system("cp -p $MOCKROOT/site-defaults.cfg $localrepo");
+    }
 
-    system("cp -p $MOCKROOT/site-defaults.cfg $localrepo");
-    system("cp -p $MOCKROOT/logging.ini $localrepo");
+    if (! -f "$localrepo/logging.ini") {
+        system("cp -p $MOCKROOT/logging.ini $localrepo");
+    }
     return $localrepo;
 }
 
 if (! -d "$localrepo/scratch") {
     mkdir "$localrepo/scratch"
-	or die "mkdir $localrepo/scratch: $!\nIf you haven't set up a local repository yet, you must read the README file.\n";
+        or die "mkdir $localrepo/scratch: $!\nIf you haven't set up a local repository yet, you must read the README file.\n";
 }
 
 system "rm -rf $localrepo/scratch/*";
@@ -377,53 +400,57 @@ my @errors = ();
 # around the caching bug in mock/yum.
 foreach my $arch (@arches) {
     foreach my $distro (@distros) {
-	my $smockcfgdir = prepare_smock_cfg($arch,$distro);
-	foreach my $name (@buildorder) {
-	    my $version = $srpms{$name}->{version};
-	    my $release = $srpms{$name}->{release};
-	    my $srpm_filename = $srpms{$name}->{filename};
+        my $smockcfgdir = prepare_smock_cfg($arch,$distro);
+        foreach my $name (@buildorder) {
+            my $version = $srpms{$name}->{version};
+            my $release = $srpms{$name}->{release};
+            my $srpm_filename = $srpms{$name}->{filename};
 
-	    $release =~ s/\.fc?\d+$//; # "1.fc9" -> "1"
+            $release =~ s/\.fc?\d+$//; # "1.fc9" -> "1"
 
-	    # Does the built (binary) package exist already?
-	    my $pattern = "$localrepo/$distro/$arch/RPMS/$name-$version-$release.*.rpm";
-	    #print "pattern = $pattern\n";
-	    my @binaries = glob $pattern;
+            # Does the built (binary) package exist already?
+            my $pattern = "$localrepo/$distro/$arch/RPMS/$name-$version-$release.*.rpm";
+            #print "pattern = $pattern\n";
+            my @binaries = glob $pattern;
 
-	    if (@binaries == 0)
-	    {
-		# Rebuild the package.
-		print "*** building $name-$version-$release $arch $distro ***\n";
+            if (@binaries != 0 && $overwrite) {
+                print "*** overwriting $name-$version-$release $arch $distro ***\n";
+            }
 
-		createrepo ($arch, $distro);
+            if (@binaries == 0 || $overwrite)
+            {
+                # Rebuild the package.
+                print "*** building $name-$version-$release $arch $distro ***\n";
 
-		my $scratchdir = "$localrepo/scratch/$name-$distro-$arch";
-		mkdir $scratchdir;
+                createrepo ($arch, $distro);
 
-        print "executing mock -r $distro-$arch$suffix $definestr --configdir $smockcfgdir --resultdir $scratchdir $srpm_filename\n";
-		if (system ("mock -r $distro-$arch$suffix $definestr --configdir $smockcfgdir --resultdir $scratchdir $srpm_filename") == 0) {
-		    # Build was a success so move the final RPMs into the
-		    # mock repo for next time.
-		    system ("mv $scratchdir/*.src.rpm $localrepo/$distro/src/SRPMS") == 0 or die "mv";
-		    system ("mv $scratchdir/*.rpm $localrepo/$distro/$arch/RPMS") == 0 or die "mv";
-		    my_mkdir "$localrepo/$distro/$arch/logs/$name-$version-$release";
-		    system ("mv $scratchdir/*.log $localrepo/$distro/$arch/logs/$name-$version-$release/") == 0 or die "mv";
-		    system "rm -rf $scratchdir";
+                my $scratchdir = "$localrepo/scratch/$name-$distro-$arch";
+                mkdir $scratchdir;
 
-		    createrepo ($arch, $distro);
+                print "executing mock -r $distro-$arch$suffix $definestr --configdir $smockcfgdir --resultdir $scratchdir $srpm_filename\n";
+                if (system ("mock -r $distro-$arch$suffix $definestr --configdir $smockcfgdir --resultdir $scratchdir $srpm_filename") == 0) {
+                    # Build was a success so move the final RPMs into the
+                    # mock repo for next time.
+                    system ("mv $scratchdir/*.src.rpm $localrepo/$distro/src/SRPMS") == 0 or die "mv";
+                    system ("mv $scratchdir/*.rpm $localrepo/$distro/$arch/RPMS") == 0 or die "mv";
+                    my_mkdir "$localrepo/$distro/$arch/logs/$name-$version-$release";
+                    system ("mv $scratchdir/*.log $localrepo/$distro/$arch/logs/$name-$version-$release/") == 0 or die "mv";
+                    system "rm -rf $scratchdir";
 
-		}
-		else {
-		    push @errors, "$name-$distro-$arch$suffix";
-		    print STDERR "Build failed, return code $?\nLeaving the logs in $scratchdir\n";
-		    exit 1 unless $keepgoing;
-		}
-	    }
-	    else
-	    {
-		print "skipping $name-$version-$release $arch $distro\n";
-	    }
-	}
+                    createrepo ($arch, $distro);
+
+                }
+                else {
+                    push @errors, "$name-$distro-$arch$suffix";
+                    print STDERR "Build failed, return code $?\nLeaving the logs in $scratchdir\n";
+                    exit 1 unless $keepgoing;
+                }
+            }
+            else
+            {
+                print "skipping $name-$version-$release $arch $distro\n";
+            }
+        }
     }
 }
 
