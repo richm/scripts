@@ -64,9 +64,11 @@ my $remove    = $o{remove};
 # optional in create case
 my $with_ssl  = $o{'with-ssl'};
 
+my $scheme = ($with_ssl && "ldaps") || "ldap";
+
 # optional in all cases
-my $port1      = $o{port1}    || ($with_ssl && "636") || "389";
-my $port2      = $o{port2}    || ($with_ssl && "636") || "389";
+my $port1     = $o{port1}    || ($with_ssl && "636") || "389";
+my $port2     = $o{port2}    || ($with_ssl && "636") || "389";
 my $base      = $o{base}    || get_base($host1, $port1);
 my $binddn    = $o{binddn}  || "cn=directory manager";
 
@@ -156,7 +158,7 @@ sub display_agreement
     my $msg;
     my $res;
 
-    my $ldap = Net::LDAP->new($server, port => $prt) || die "$@";
+    my $ldap = Net::LDAP->new("$scheme://$server", port => $prt) || die "$@";
 
     $msg     = $ldap->bind($binddn, password => $bindpw, version => 3);
     $msg->code && die $msg->error;
@@ -193,7 +195,7 @@ sub remove_agreement
     my $msg;
     my $res;
 
-    my $ldap = Net::LDAP->new($from, port => $prt) || die "$@";
+    my $ldap = Net::LDAP->new("$scheme://$from", port => $prt) || die "$@";
 
     $msg     = $ldap->bind($binddn, password => $bindpw, version => 3);
     $msg->code && die $msg->error;
@@ -221,7 +223,7 @@ sub config_supplier
     my $msg;
     my $res;
 
-    my $ldap = Net::LDAP->new($server, port => $prt) || die "$@";
+    my $ldap = Net::LDAP->new("$scheme://$server", port => $prt) || die "$@";
 
     $msg     = $ldap->bind($binddn, password => $bindpw, version => 3);
     $msg->code && die $msg->error;
@@ -328,8 +330,8 @@ sub add_rep_agreement
 
     my $msg;
     my $res;
-    
-    my $ldap = Net::LDAP->new($from, port => $prt1) || die "$@";
+
+    my $ldap = Net::LDAP->new("$scheme://$from", port => $prt1) || die "$@";
 
     $msg     = $ldap->bind($binddn, password => $bindpw, version => 3);
     $msg->code && die $msg->error;
@@ -401,7 +403,7 @@ sub initialize
     my $msg;
     my $res;
 
-    my $ldap = Net::LDAP->new($from, port => $prt1) || die "$@";
+    my $ldap = Net::LDAP->new("$scheme://$from", port => $prt1) || die "$@";
 
     $msg     = $ldap->bind($binddn, password => $bindpw, version => 3);
     $msg->code && die $msg->error;
@@ -424,7 +426,7 @@ sub get_base
     my $base;
     my $res;
 
-    my $ldap = Net::LDAP->new($server, port => $prt) || die "$@";
+    my $ldap = Net::LDAP->new("$scheme://$server", port => $prt) || die "$@";
     $ldap->bind;
 
     $res = $ldap->search(
