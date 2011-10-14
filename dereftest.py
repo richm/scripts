@@ -50,16 +50,21 @@ derefspeclist = (
     ('member', ('uid', 'roomNumber', 'nsRoleDN', 'nsRole'))
     ,)
 
-serverctrls = [derefctrl.DerefCtrl(derefspeclist,False)]
+dc = derefctrl.DerefCtrl(derefspeclist,False)
+serverctrls = [dc]
 filter = "objectclass=*"
 attrlist = ['cn']
 msgid = srv.search_ext(groupent.dn, ldap.SCOPE_BASE, filter, attrlist, 0, serverctrls)
 while True:
-    (rtype, rdata, rmsgid, decoded_serverctrls) = srv.result3(msgid, 0)
+    rtype, rdata, rmsgid, decoded_serverctrls, rspoid, rspval = srv.result4(msgid, 0, -1, 1)
     print "Search returned %d results" % len(rdata)
     pprint.pprint(decoded_serverctrls)
-    for dn, ent in rdata:
+    for dn, ent, ctrls in rdata:
         pprint.pprint(ent)
+        for oid,crit,val in ctrls:
+            if oid == dc.controlType:
+                dc.decodeControlValue(val)
+                pprint.pprint(dc.dereflist)
         print ""
     if rtype == ldap.RES_SEARCH_RESULT:
         break

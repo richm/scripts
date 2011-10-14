@@ -139,6 +139,14 @@ class DerefCtrl(LDAPControl):
     The draft Dereference Control
     """
     controlType = "1.3.6.1.4.1.4203.666.5.16"
+    # dereflist is a list - each item is a tuple
+    # (derefattr, derefdn, attrvals)
+    # defefattr is the string attribute name that was dereferenced
+    # derefdn is the string DN that was dereferenced
+    # attrvals is a dict - the key is the name of the attribute
+    # from the dereferenced entry - the value is a list of values
+    # for that attribute
+    dereflist = []
 
     def __init__(self,derefspeclist,criticality=True):
         LDAPControl.__init__(self,DerefCtrl.controlType,criticality,derefspeclist)
@@ -161,6 +169,7 @@ class DerefCtrl(LDAPControl):
             self.controlValue = None
             return
 
+        self.dereflist = []
         valiter = TLVIter(encodedValue)
         (tag, dlen, val) = valiter.next()
         valiter.seqlen(dlen)
@@ -178,8 +187,7 @@ class DerefCtrl(LDAPControl):
                     valiter.seqlen(dlen)
                     for (tag, dlen, val) in valiter:
                         attrvals[attrname].append(val)
-            print "derefattr = ", derefattr, "derefdn = ", derefdn
-            pprint.pprint(attrvals)
+            self.dereflist.append((derefattr, derefdn, attrvals))
 
     def update(self,ctrls):
         for ctrl in ctrls:
@@ -238,6 +246,7 @@ def main():
     enc = encoderesultvalue(testres)
     pprint.pprint(enc)
     dc.decodeControlValue(enc)
+    pprint.pprint(dc.dereflist)
 
 if __name__ == '__main__':
     main()
