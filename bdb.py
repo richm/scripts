@@ -1,4 +1,5 @@
 import sys
+import os
 import bsddb.db
 
 txn_flags = 0 # bsddb.db.DB_TXN_SNAPSHOT
@@ -7,7 +8,7 @@ cur_flags = 0 # bsddb.db.DB_TXN_SNAPSHOT
 def print_records(db, txn=None):
     flags = cur_flags
     if txn:
-        print "txn records"
+        print "records for txn", txn
     else:
         print "no txn records"
     cur = db.cursor(txn, flags)
@@ -22,12 +23,16 @@ def print_records(db, txn=None):
     cur.close()
 
 dbdir = "/var/tmp/dbtest"
+try: os.mkdir(dbdir)
+except OSError, e:
+    if e.errno == os.errno.EEXIST: pass
+    else: raise e
 env = bsddb.db.DBEnv()
 envflags = bsddb.db.DB_CREATE|bsddb.db.DB_RECOVER|bsddb.db.DB_INIT_LOCK|bsddb.db.DB_INIT_LOG|bsddb.db.DB_INIT_TXN|bsddb.db.DB_INIT_MPOOL|bsddb.db.DB_THREAD
 print "open dbenv in", dbdir
 env.open(dbdir, envflags)
 
-allow_uncommitted = False
+allow_uncommitted = True
 db = bsddb.db.DB(env)
 dbflags = bsddb.db.DB_CREATE|bsddb.db.DB_AUTO_COMMIT|bsddb.db.DB_THREAD
 #dbflags = bsddb.db.DB_CREATE|bsddb.db.DB_AUTO_COMMIT|bsddb.db.DB_THREAD|bsddb.db.DB_MULTIVERSION
@@ -37,11 +42,11 @@ dbfile = dbdir + "/dbtest.db4"
 print "open db", dbfile
 db.open(dbfile, dbtype=bsddb.db.DB_BTREE, flags=dbflags)
 
-seq_flags = bsddb.db.DB_CREATE|bsddb.db.DB_THREAD
-uidseq = bsddb.db.DBSequence(db)
-uidseq.open("uidnumber", None, seq_flags)
-usnseq = bsddb.db.DBSequence(db)
-usnseq.open("usn", None, seq_flags)
+#seq_flags = bsddb.db.DB_CREATE|bsddb.db.DB_THREAD
+#uidseq = bsddb.db.DBSequence(db)
+#uidseq.open("uidnumber", None, seq_flags)
+#usnseq = bsddb.db.DBSequence(db)
+#usnseq.open("usn", None, seq_flags)
 
 def test1():
     print "test 1 - abort child txn but commit parent txn"
@@ -105,61 +110,93 @@ def test2():
     partxn.abort()
     print_records(db)
 
-test1()
-test2()
-print "test 3 - commit child and parent"
-print "create parent txn"
-partxn = env.txn_begin(None, txn_flags)
-print "read records in empty database"
-print_records(db, partxn)
+def test3():
+    print "test 3 - commit child and parent"
+    print "create parent txn"
+    partxn = env.txn_begin(None, txn_flags)
+    print "read records in empty database"
+    print_records(db, partxn)
 #print_records(db)
-print "do a write inside the parent before the child"
-db.put("parent before key3", "parent before data3", partxn)
+    print "do a write inside the parent before the child"
+    db.put("parent before key3", "parent before data3", partxn)
 #print "run db_stat -C A and press Enter"
 #null = sys.stdin.readline()
 #print "read records"
-print_records(db, partxn)
+    print_records(db, partxn)
 #print "run db_stat -C A and press Enter"
 #null = sys.stdin.readline()
-uidnum = uidseq.get(1, partxn)
-print "uidnumber is", uidnum
-
-
+    uidnum = uidseq.get(1, partxn)
+    print "uidnumber is", uidnum
 #print_records(db)
-
-print "create child transaction"
-chitxn = env.txn_begin(partxn, txn_flags)
-print "read records"
-print_records(db, chitxn)
-print_records(db, partxn)
+    print "create child transaction"
+    chitxn = env.txn_begin(partxn, txn_flags)
+    print "read records"
+    print_records(db, chitxn)
+    print_records(db, partxn)
 #print_records(db)
-
-print "do a write inside the child"
-db.put("child key3", "child data3", chitxn)
-print "read records"
-print_records(db, chitxn)
-print_records(db, partxn)
+    print "do a write inside the child"
+    db.put("child key3", "child data3", chitxn)
+    print "read records"
+    print_records(db, chitxn)
+    print_records(db, partxn)
 #print_records(db)
-usnnum = usnseq.get(1, chitxn)
-print "usn is", usnnum
-
-print "commit the child txn"
-chitxn.commit()
-print "read records"
-print_records(db, partxn)
+    usnnum = usnseq.get(1, chitxn)
+    print "usn is", usnnum
+    print "commit the child txn"
+    chitxn.commit()
+    print "read records"
+    print_records(db, partxn)
 #print_records(db)
-
-print "do a write inside the parent after the child"
-db.put("parent after key3", "parent after data3", partxn)
-print "read records"
-print_records(db, partxn)
+    print "do a write inside the parent after the child"
+    db.put("parent after key3", "parent after data3", partxn)
+    print "read records"
+    print_records(db, partxn)
 #print_records(db)
+    print "commit the transaction"
+    partxn.commit()
+    print "read records"
+    print_records(db)
+    uidnum = uidseq.get()
+    print "uidnumber is", uidnum
+    usnnum = usnseq.get()
+    print "usn is", usnnum
 
-print "commit the transaction"
-partxn.commit()
-print "read records"
-print_records(db)
-uidnum = uidseq.get()
-print "uidnumber is", uidnum
-usnnum = usnseq.get()
-print "usn is", usnnum
+def test4():
+    print "attempt to start a new transaction while another transaction is open"
+    txn1 = env.txn_begin(None, txn_flags)
+    print "read records in empty database"
+    print_records(db, txn1)
+    print "add record with txn1"
+    db.put("test4 key1", "test4 data1", txn1)
+    print "read records with txn1"
+    print_records(db, txn1)
+    print "start a new transaction"
+    txn2 = env.txn_begin(None, txn_flags)
+    print "add record with txn2"
+    db.put("test4 key2", "test4 data2", txn2)
+    print "read records with txn2"
+    print_records(db, txn2)
+
+def test5():
+    print "attempt to read the db without a txn while another transaction is open"
+    txn1 = env.txn_begin(None, txn_flags)
+    print "read records in empty database"
+    print_records(db, txn1)
+    print "read records without txn"
+    print_records(db)
+    print "add record with txn1"
+    db.put("test5 key1", "test5 data1", txn1)
+    print "read records with txn1"
+    print_records(db, txn1)
+    print "read records without txn"
+    print_records(db)
+    print "commit txn"
+    txn1.commit()
+    print "read records without txn"
+    print_records(db)
+
+#test1()
+#test2()
+#test3()
+#test4()
+test5()

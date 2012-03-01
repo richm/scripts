@@ -4,8 +4,8 @@ if [ ! "$NETSITE_ROOT" ] ; then
 	NETSITE_ROOT=`pwd | sed -e s@/bin/slapd/server@@g`
 fi
 
-export MALLOC_PERTURB_=$(($RANDOM % 255 + 1))
-export MALLOC_CHECK_=3
+#export MALLOC_PERTURB_=$(($RANDOM % 255 + 1))
+#export MALLOC_CHECK_=3
 
 # assumes you have renamed the original ns-slapd binary
 # to ns-slapd.orig
@@ -19,6 +19,9 @@ VGSUPPRESS="--suppressions=/tmp/valgrind.supp"
 QUIETMODE="-q"
 
 VG_LOGDIR=${VG_LOGDIR:-/var/tmp}
+if [ ! -d $VG_LOGDIR ] ; then
+    mkdir -p $VG_LOGDIR || { echo error: could not mkdir -p $VG_LOGDIR ; exit 1; }
+fi
 
 if [ $USE_PURIFY ]; then
 	LD_LIBRARY_PATH=$NETSITE_ROOT/lib:$NETSITE_ROOT/bin/slapd/lib:$LD_LIBRARY_PATH
@@ -30,7 +33,7 @@ if [ $USE_PURIFY ]; then
 	USE_VALGRIND=1
 fi
 
-if [ "$USE_VALGRIND" -o "$USE_CALLGRIND" ]; then
+if [ "$USE_VALGRIND" -o "$USE_CALLGRIND" -o "$USE_DRD" ]; then
 	if [ $TET_PNAME ]; then
 		mybase=`basename $TET_PNAME .ksh`
 		mybase=`basename $mybase .sh`
@@ -45,7 +48,11 @@ if [ "$USE_VALGRIND" -o "$USE_CALLGRIND" ]; then
     if [ $USE_VALGRIND ] ; then
 	    CHECKCMD="valgrind $QUIETMODE --tool=memcheck --leak-check=yes --leak-resolution=high $VGSUPPRESS $DEMANGLE --num-callers=50 --log-file=$outputfile"
     elif [ $USE_CALLGRIND ] ; then
-        CHECKCMD="valgrind $QUIETMODE --tool=callgrind --callgrind-out-file=${VG_LOGDIR}/callgrind.out.$$"
+        # collect bus is only for valgrind 3.6 and later - it collects lock/mutex events
+        CHECKCMD="valgrind $QUIETMODE --tool=callgrind --collect-systime=yes --collect-bus=yes --separate-threads=yes --callgrind-out-file=${VG_LOGDIR}/callgrind.out.$$"
+        USE_VALGRIND=1
+    elif [ $USE_DRD ] ; then
+        CHECKCMD="valgrind $QUIETMODE --tool=drd --show-stack-usage=yes --shared-threshold=100 --exclusive-threshold=100 --error-limit=no --num-callers=50 --log-file=${VG_LOGDIR}/drd.out.$$"
         USE_VALGRIND=1
     fi
 fi
@@ -54,22 +61,30 @@ if [ $USE_GDB ]; then
 #	DISPLAY=:1 ; export DISPLAY
 	case "$1" in
 	db2index|suffix2instance|db2archive|archive2db|db2ldif|ldif2db)
-	xterm -bg white -fn 10x20 -sb -sl 2000 -title gdb -e gdb --args $SLAPD
+	xterm -bg white -fn 10x20 -sb -sl 2000 -title gdb -e gdb --args $SLAPD "$@"
 	;;
 	*)
-	xterm -bg white -fn 10x20 -sb -sl 2000 -title gdb -e gdb --args $SLAPD &
+	(xterm -bg white -fn 10x20 -sb -sl 2000 -title gdb -e gdb --args $SLAPD -d 0 "$@") &
 	;;
 	esac
 elif [ $USE_VALGRIND ]; then
 	case "$1" in
 	db2index|suffix2instance|db2archive|archive2db|db2ldif|ldif2db)
-		$CHECKCMD $SLAPD "$@"
-		;;
+	$CHECKCMD $SLAPD "$@"
+	;;
 	*)
-#		$SLAPD "$@" -d 0 &
-		$CHECKCMD $SLAPD "$@"
-		;;
-	esac
+	$CHECKCMD $SLAPD -d 0 "$@" &
+    ;;
+    esac
+elif [ -n "$USE_MUTRACE" ]; then
+    case "$1" in
+    db2index|suffix2instance|db2archive|archive2db|db2ldif|ldif2db)
+    $SLAPD "$@"
+    ;;
+    *)
+    LD_PRELOAD="$USE_MUTRACE" $SLAPD -d 0 "$@" > $VG_LOGDIR/mutrace.out.$$ 2>&1 &
+    ;;
+    esac
 else
 	$SLAPD "$@"
 fi

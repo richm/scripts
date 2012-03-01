@@ -22,7 +22,7 @@ m1replargs = {
     'pd': 5,
     'tpi': 5
 }
-os.environ['USE_VALGRIND'] = "1"
+os.environ['USE_GDB'] = "1"
 m1 = DSAdmin.createAndSetupReplica({
 	'newrootpw': 'password',
 	'newhost': host1,
@@ -32,7 +32,7 @@ m1 = DSAdmin.createAndSetupReplica({
     'no_admin': True
 }, m1replargs
 )
-del os.environ['USE_VALGRIND']
+del os.environ['USE_GDB']
 
 m2replargs = m1replargs
 m2 = DSAdmin.createAndSetupReplica({
@@ -97,6 +97,9 @@ print "get the uuid of the parent"
 ents = m1.search_s(dn, ldap.SCOPE_BASE, "objectclass=*", ['nsuniqueid'])
 parentuuid = ents[0].nsuniqueid
 print "parent uuid is", parentuuid
+
+print "wait for repl to happen..."
+time.sleep(5)
 
 nusers = 100
 print "add", nusers, "users"

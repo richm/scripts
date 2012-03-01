@@ -59,11 +59,6 @@ else
     needASCert=1
 fi
 
-if test -z "$needCA" -a -z "$needServerCert" -a -z "$needASCert" ; then
-    echo "No certs needed - exiting"
-    exit 0
-fi
-
 # get our user and group
 if test -n "$isroot" ; then
     uid=`/bin/ls -ald $secdir | awk '{print $3}'`
@@ -71,41 +66,42 @@ if test -n "$isroot" ; then
 fi
 
 # 2. Create a password file for your security token password:
-if [ -f $secdir/pwdfile.txt ] ; then
-    echo "Using existing $secdir/pwdfile.txt"
-else
-    echo "Creating password file for security token"
-    (ps -ef ; w ) | sha1sum | awk '{print $1}' > $secdir/pwdfile.txt
-    if test -n "$isroot" ; then
-        chown $uid:$gid $secdir/pwdfile.txt
+if [ -n "$needCA" -o -n "$needServerCert" -o -n "$needASCert" ] ; then
+    if [ -f $secdir/pwdfile.txt ] ; then
+        echo "Using existing $secdir/pwdfile.txt"
+    else
+        echo "Creating password file for security token"
+        (ps -ef ; w ) | sha1sum | awk '{print $1}' > $secdir/pwdfile.txt
+        if test -n "$isroot" ; then
+            chown $uid:$gid $secdir/pwdfile.txt
+        fi
+        chmod 400 $secdir/pwdfile.txt
     fi
-    chmod 400 $secdir/pwdfile.txt
-fi
 
 # 3. Create a "noise" file for your encryption mechanism: 
-if [ -f $secdir/noise.txt ] ; then
-    echo "Using existing $secdir/noise.txt file"
-else
-    echo "Creating noise file"
-    (w ; ps -ef ; date ) | sha1sum | awk '{print $1}' > $secdir/noise.txt
-    if test -n "$isroot" ; then
-        chown $uid:$gid $secdir/noise.txt
+    if [ -f $secdir/noise.txt ] ; then
+        echo "Using existing $secdir/noise.txt file"
+    else
+        echo "Creating noise file"
+        (w ; ps -ef ; date ) | sha1sum | awk '{print $1}' > $secdir/noise.txt
+        if test -n "$isroot" ; then
+            chown $uid:$gid $secdir/noise.txt
+        fi
+        chmod 400 $secdir/noise.txt
     fi
-    chmod 400 $secdir/noise.txt
-fi
 
 # 4. Create the key3.db and cert8.db databases:
-if [ -z "$prefix" ] ; then
-    echo "Creating initial key and cert db"
-else
-    echo "Creating new key and cert db"
+    if [ -z "$prefix" ] ; then
+        echo "Creating initial key and cert db"
+    else
+        echo "Creating new key and cert db"
+    fi
+    certutil -N $prefixarg -d $secdir -f $secdir/pwdfile.txt
+    if test -n "$isroot" ; then
+        chown $uid:$gid $secdir/${prefix}key3.db $secdir/${prefix}cert8.db
+    fi
+    chmod 600 $secdir/${prefix}key3.db $secdir/${prefix}cert8.db
 fi
-certutil -N $prefixarg -d $secdir -f $secdir/pwdfile.txt
-if test -n "$isroot" ; then
-    chown $uid:$gid $secdir/${prefix}key3.db $secdir/${prefix}cert8.db
-fi
-chmod 600 $secdir/${prefix}key3.db $secdir/${prefix}cert8.db
-
 
 if test -n "$needCA" ; then
 # 5. Generate the encryption key:
@@ -162,13 +158,15 @@ else
     echo Using existing $secdir/pin.txt
 fi
 
-if [ -n "$prefix" ] ; then
+if [ -n "$needCA" -o -n "$needServerCert" -o -n "$needASCert" ] ; then
+    if [ -n "$prefix" ] ; then
     # move the old files out of the way
-    mv $secdir/cert8.db $secdir/orig-cert8.db
-    mv $secdir/key3.db $secdir/orig-key3.db
+        mv $secdir/cert8.db $secdir/orig-cert8.db
+        mv $secdir/key3.db $secdir/orig-key3.db
     # move in the new files - will be used after server restart
-    mv $secdir/${prefix}cert8.db $secdir/cert8.db
-    mv $secdir/${prefix}key3.db $secdir/key3.db
+        mv $secdir/${prefix}cert8.db $secdir/cert8.db
+        mv $secdir/${prefix}key3.db $secdir/key3.db
+    fi
 fi
 
 # create the admin server key/cert db
@@ -201,7 +199,7 @@ if [ ! -f $assecdir/password.conf ] ; then
     chmod 400 $assecdir/password.conf
 fi
 
-# tell admin server to use the password file
+# tell admin server to use the password file and turn on mod_nss
 if [ -f $assecdir/nss.conf ] ; then
     cd $assecdir
     echo Enabling the use of a password file in admin server
@@ -210,12 +208,34 @@ if [ -f $assecdir/nss.conf ] ; then
         chown $uid:$gid nss.conf
     fi
     chmod 400 nss.conf
+    echo Turning on NSSEngine
+    sed -e "s@^NSSEngine off@NSSEngine on@" console.conf > /tmp/console.conf && mv /tmp/console.conf console.conf
+    if test -n "$isroot" ; then
+        chown $uid:$gid console.conf
+    fi
+    chmod 600 console.conf
+    echo Use ldaps for config ds connections
+    sed -e "s@^ldapurl: ldap://$myhost:$ldapport/o=NetscapeRoot@ldapurl: ldaps://$myhost:$ldapsport/o=NetscapeRoot@" adm.conf > /tmp/adm.conf && mv /tmp/adm.conf adm.conf
+    if test -n "$isroot" ; then
+        chown $uid:$gid adm.conf
+    fi
+    chmod 600 adm.conf
     cd $secdir
 fi
 
 # enable SSL in the directory server
-echo "Enabling SSL in the directory server - when prompted, provide the directory manager password"
-ldapmodify -x -h localhost -p $ldapport -D "cn=directory manager" -W <<EOF
+echo "Enabling SSL in the directory server"
+if [ -z "$DMPWD" ] ; then
+    echo "when prompted, provide the directory manager password"
+    echo -n "Password:"
+    stty -echo
+    read dmpwd
+    stty echo
+else
+    dmpwd="$DMPWD"
+fi
+
+ldapmodify -x -h localhost -p $ldapport -D "cn=directory manager" -w "$dmpwd" <<EOF
 dn: cn=encryption,cn=config
 changetype: modify
 replace: nsSSL3
@@ -249,6 +269,37 @@ cn: RSA
 nsSSLPersonalitySSL: Server-Cert
 nsSSLToken: internal (software)
 nsSSLActivation: on
+
+EOF
+
+ldapsearch_attrval()
+{
+    attrname="$1"
+    shift
+    ldapsearch "$@" $attrname | sed -n '/^'$attrname':/,/^$/ { /^'$attrname':/ { s/^'$attrname': *// ; h ; $ !d}; /^ / { H; $ !d}; /^ /! { x; s/\n //g; p; q}; $ { x; s/\n //g; p; q} }'
+}
+
+echo "Enabling SSL in the admin server"
+# find the directory server config entry DN
+dsdn=`ldapsearch_attrval dn -x -LLL -h localhost -p $ldapport -D "cn=directory manager" -w "$dmpwd" -b o=netscaperoot "(&(objectClass=nsDirectoryServer)(serverhostname=$myhost)(nsserverport=$ldapport))"`
+ldapmodify -x -h localhost -p $ldapport -D "cn=directory manager" -w "$dmpwd" <<EOF
+dn: $dsdn
+changetype: modify
+replace: nsServerSecurity
+nsServerSecurity: on
+-
+replace: nsSecureServerPort
+nsSecureServerPort: $ldapsport
+
+EOF
+
+# find the admin server config entry DN
+asdn=`ldapsearch_attrval dn -x -LLL -h localhost -p $ldapport -D "cn=directory manager" -w "$dmpwd" -b o=netscaperoot "(&(objectClass=nsAdminServer)(serverhostname=$myhost))"`
+ldapmodify -x -h localhost -p $ldapport -D "cn=directory manager" -w "$dmpwd" <<EOF
+dn: cn=configuration,$asdn
+changetype: modify
+replace: nsServerSecurity
+nsServerSecurity: on
 
 EOF
 

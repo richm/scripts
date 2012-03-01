@@ -5,8 +5,7 @@ import ldap
 from dsadmin import DSAdmin, Entry
 
 host1 = "localhost.localdomain"
-cfgport = 1100
-port1 = cfgport + 30
+port1 = 3890
 
 basedn = 'o=attrcrypt.com'
 newinst = 'srv'

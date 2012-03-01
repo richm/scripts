@@ -16,6 +16,7 @@ import tempfile
 import pprint
 import shutil
 import datetime
+import select
 
 from ldap.ldapobject import SimpleLDAPObject
 from ldapurl import LDAPUrl
@@ -1329,15 +1330,13 @@ class DSAdmin(SimpleLDAPObject):
             entry = self.getEntry(dn, ldap.SCOPE_BASE)
         except ldap.NO_SUCH_OBJECT: entry = None
         if entry:
-            print "Agreement exists:"
-            print entry
+            print "Agreement exists:", dn
             if not nsuffix in self.suffixes:
                 self.suffixes[nsuffix] = {}
             self.suffixes[nsuffix][str(repoth)] = dn
             return dn
-        if repoth in self.agmt:
-            print "Agreement exists:"
-            print self.agmt[repoth]
+        if (nsuffix in self.agmt) and (repoth in self.agmt[nsuffix]):
+            print "Agreement exists:", dn
             return dn
 
         entry = Entry(dn)
@@ -1382,7 +1381,7 @@ class DSAdmin(SimpleLDAPObject):
                 repoth.setupConsumerChainOnUpdate(suffix, 0, binddn, bindpw, self.toLDAPURL(), args['chainargs'])
             elif chain and repoth.suffixes[nsuffix]['type'] == HUB_TYPE:
                 repoth.setupConsumerChainOnUpdate(suffix, 1, binddn, bindpw, self.toLDAPURL(), args['chainargs'])
-        self.agmt[repoth] = dn
+        self.agmt.setdefault(nsuffix, {})[repoth] = dn
         return dn
 
     def stopReplication(self, agmtdn):
@@ -1533,9 +1532,60 @@ class DSAdmin(SimpleLDAPObject):
         if repArgs.has_key('legacy'):
             self.setupLegacyConsumer(repArgs.get('binddn'), repArgs.get('bindpw'))
 
+    def subtreePwdPolicy(self, basedn, pwdpolicy, verbose=False, **pwdargs):
+        args = {'basedn':basedn,'escdn':DSAdmin.escapeDNValue(DSAdmin.normalizeDN(basedn))}
+        condn = "cn=nsPwPolicyContainer,%(basedn)s" % args
+        poldn = "cn=cn\\=nsPwPolicyEntry\\,%(escdn)s,cn=nsPwPolicyContainer,%(basedn)s" % args
+        temdn = "cn=cn\\=nsPwTemplateEntry\\,%(escdn)s,cn=nsPwPolicyContainer,%(basedn)s" % args
+        cosdn = "cn=nsPwPolicy_cos,%(basedn)s" % args
+        conent = Entry(condn)
+        conent.setValues('objectclass', 'nsContainer')
+        polent = Entry(poldn)
+        polent.setValues('objectclass', ['ldapsubentry', 'passwordpolicy'])
+        tement = Entry(temdn)
+        tement.setValues('objectclass', ['extensibleObject', 'costemplate', 'ldapsubentry'])
+        tement.setValues('cosPriority', '1')
+        tement.setValues('pwdpolicysubentry', poldn)
+        cosent = Entry(cosdn)
+        cosent.setValues('objectclass', ['ldapsubentry', 'cosSuperDefinition', 'cosPointerDefinition'])
+        cosent.setValues('cosTemplateDn', temdn)
+        cosent.setValues('cosAttribute', 'pwdpolicysubentry default operational-default')
+        for ent in (conent, polent, tement, cosent):
+            try:
+                self.add_s(ent)
+                if verbose: print "created subtree pwpolicy entry", ent.dn
+            except ldap.ALREADY_EXISTS:
+                print "subtree pwpolicy entry", ent.dn, "already exists - skipping"
+        self.setPwdPolicy({'nsslapd-pwpolicy-local':'on'})
+        self.setDNPwdPolicy(poldn, pwdpolicy, **pwdargs)
+
+    def userPwdPolicy(self, user, pwdpolicy, verbose=False, **pwdargs):
+        ary = ldap.explode_dn(user)
+        par = ','.join(ary[1:])
+        escuser = DSAdmin.escapeDNValue(DSAdmin.normalizeDN(user))
+        args = {'par':par,'udn':user,'escudn':escuser}
+        condn = "cn=nsPwPolicyContainer,%(par)s" % args
+        poldn = "cn=cn\\=nsPwPolicyEntry\\,%(escudn)s,cn=nsPwPolicyContainer,%(par)s" % args
+        conent = Entry(condn)
+        conent.setValues('objectclass', 'nsContainer')
+        polent = Entry(poldn)
+        polent.setValues('objectclass', ['ldapsubentry', 'passwordpolicy'])
+        for ent in (conent, polent):
+            try:
+                self.add_s(ent)
+                if verbose: print "created user pwpolicy entry", ent.dn
+            except ldap.ALREADY_EXISTS:
+                print "user pwpolicy entry", ent.dn, "already exists - skipping"
+        mod = [(ldap.MOD_REPLACE, 'pwdpolicysubentry', poldn)]
+        self.modify_s(user, mod)
+        self.setPwdPolicy({'nsslapd-pwpolicy-local':'on'})
+        self.setDNPwdPolicy(poldn, pwdpolicy, **pwdargs)
+
     def setPwdPolicy(self, pwdpolicy, **pwdargs):
+        self.setDNPwdPolicy("cn=config", pwdpolicy, **pwdargs)
+
+    def setDNPwdPolicy(self, dn, pwdpolicy, **pwdargs):
         """input is dict of attr/vals"""
-        dn = "cn=config"
         mods = []
         for (attr, val) in pwdpolicy.iteritems():
             mods.append((ldap.MOD_REPLACE, attr, str(val)))
@@ -1603,7 +1653,7 @@ class DSAdmin(SimpleLDAPObject):
         if ents and (len(ents) > 0): ent = ents[0]
         elif tryrepl:
             print "Could not get RUV from", suffix, "entry - trying cn=replica"
-            ensuffix = escapeDNValue(normalizeDN(suffix))
+            ensuffix = DSAdmin.escapeDNValue(DSAdmin.normalizeDN(suffix))
             dn = "cn=replica,cn=%s,cn=mapping tree,cn=config" % ensuffix
             ents = self.search_s(dn, ldap.SCOPE_BASE, "objectclass=*", attrs)
         if ents and (len(ents) > 0): ent = ents[0]
@@ -1965,8 +2015,15 @@ SchemaFile= %s
         pipe = Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=STDOUT)
         pipe.stdin.write(content)
         pipe.stdin.close()
-        for line in pipe.stdout:
-            if verbose: sys.stdout.write(line)
+        while not pipe.poll():
+            (rr, wr, xr) = select.select([pipe.stdout], [], [], 1.0)
+            if rr and len(rr) > 0:
+                line = rr[0].readline()
+                if not line:
+                    break
+                if verbose: sys.stdout.write(line)
+            elif verbose:
+                print "timed out waiting to read from", cmd
         pipe.stdout.close()
         exitCode = pipe.wait()
         if verbose:

@@ -24,7 +24,6 @@ m1 = DSAdmin.createAndSetupReplica({
 	'newport': cfgport+10,
 	'newinst': 'm1',
 	'newsuffix': 'dc=example,dc=com',
-	'verbose': True,
     'no_admin': True
 }, m1replargs
 )
@@ -44,7 +43,6 @@ m2 = DSAdmin.createAndSetupReplica({
 	'newport': cfgport+20,
 	'newinst': 'm2',
 	'newsuffix': 'dc=example,dc=com',
-	'verbose': True,
     'no_admin': True
 }, m2replargs
 )

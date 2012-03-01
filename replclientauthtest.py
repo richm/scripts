@@ -15,7 +15,7 @@ secport1 = port1 + 1
 secport2 = port2 + 1
 
 basedn = 'dc=example,dc=com'
-os.environ['USE_VALGRIND'] = "1"
+#os.environ['USE_VALGRIND'] = "1"
 m1 = DSAdmin.createInstance({
 	'newrootpw': 'password',
 	'newhost': host1,
@@ -38,10 +38,12 @@ m2 = DSAdmin.createInstance({
 })
 #del os.environ['USE_VALGRIND']
 
-#os.environ['USE_VALGRIND'] = "1"
-m1.setupSSL(secport1)
-m2.setupSSL(secport2)
-#del os.environ['USE_VALGRIND']
+if len(sys.argv) > 1:
+    m1.setupSSL(secport1, None, {'nsSSLPersonalitySSL':'localhost.localdomain'})
+    m2.setupSSL(secport2, None, {'nsSSLPersonalitySSL':'localhost.localdomain'})
+else:
+    m1.setupSSL(secport1)
+    m2.setupSSL(secport1)
 
 print "create entry to map cert to"
 certdn = "cn=%s,cn=config" % host1

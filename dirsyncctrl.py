@@ -134,13 +134,14 @@ class DirSyncCtrl(LDAPControl):
                 return
 
 def main():
-    adhost = 'ad.example.com'
+    adhost = 'w2k8x8664.testdomain.com'
     adport = 389
     aduri = "ldap://%s:%d/" % (adhost, adport)
-    suffix = "DC=example,DC=com"
+    suffix = "DC=testdomain,DC=com"
     adroot = "cn=administrator,cn=users," + suffix
-    adrootpw = "adminpassword"
+    adrootpw = "Ornette1"
 
+    ldap.set_option(ldap.OPT_DEBUG_LEVEL, 15)
     ad = LDAPObject(aduri)
     ad.simple_bind_s(adroot, adrootpw)
 

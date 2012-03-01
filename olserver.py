@@ -82,7 +82,7 @@ def addbackend(conn, rootdir, pwd, basedn, rootdn=None, dbtype="bdb", ii=0):
     except ldap.ALREADY_EXISTS: pass
 
 def addschema(conn, rootdir, namelist):
-    schemadir = rootdir + "/etc/openldap/schema"
+    schemadir = os.environ.get('SLAPDSCHEMADIR', rootdir + "/etc/openldap/schema")
     for name in namelist:
         sf = schemadir + "/" + name + ".ldif"
         ldapadd(conn, sf)
@@ -124,6 +124,7 @@ def setupsyncrepl(conn, provider, basedn, binddn, cred, cafile='', cadir='', cer
 def createscript(src, port, hostname="localhost.localdomain"):
     scriptdir = os.path.dirname(os.path.dirname(os.path.dirname(src)))
     script = scriptdir + "/slapd-" + str(port)
+    slapdexec = os.environ.get('SLAPDEXEC', scriptdir + "/libexec/slapd")
     if not os.path.exists(script):
         sf = open(script, 'w')
         sf.write("""#!/bin/sh
@@ -137,8 +138,8 @@ fi
 if [ -n "$USE_VALGRIND" ] ; then
     CHECKCMD="valgrind -q --tool=memcheck --leak-check=yes --leak-resolution=high $VGSUPPRESS --num-callers=50 --log-file=%s/var/log/slapd-%d.vg"
 fi
-$GDB $CHECKCMD %s/libexec/slapd -F %s -h ldap://%s:%d/ $@ > %s/var/log/slapd-%d 2>&1 &
-""" % (scriptdir, scriptdir, scriptdir, port, scriptdir, src, hostname, port, scriptdir, port))
+$GDB $CHECKCMD %s -F %s -h ldap://%s:%d/ $@ > %s/var/log/slapd-%d 2>&1 &
+""" % (scriptdir, scriptdir, scriptdir, port, slapdexec, src, hostname, port, scriptdir, port))
         sf.close()
         os.chmod(script, 0700)
 
