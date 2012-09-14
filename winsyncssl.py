@@ -34,7 +34,7 @@ else:
     host1 = 'vmhost'
     suffix = "dc=testdomain,dc=com"
     realm = 'TESTDOMAIN.COM'
-    adusersubtree = "cn=testusers,ou=Test OU"
+    adusersubtree = "cn=testusers"
 #    adusersubtree = "cn=Users"
 port1 = 1200
 secport1 = 1201
@@ -343,6 +343,24 @@ except ldap.NO_SUCH_OBJECT:
     ent.setValues(rdn[0], rdn[1])
     ad.add_s(ent)
 
+for ii in xrange(1,6):
+    ent = makeADUserEnt(ii)
+    try: ad.add_s(ent)
+    except ldap.ALREADY_EXISTS:
+        print "AD entry", ent.dn, "already exists"
+    setWindowsPwd(ad, ent.dn)
+    kk = ii % len(userAcctVals)
+    mod = []
+    for attr, val in userAcctVals[kk].iteritems():
+        mod.append((ldap.MOD_REPLACE, attr, str(val)))
+    ad.modify_s(ent.dn, mod)
+
+for ii in xrange(6,11):
+    ent = makeDSUserEnt(ii)
+    try: ds.add_s(ent)
+    except ldap.ALREADY_EXISTS:
+        print "DS entry", ent.dn, "already exists"
+
 replargs['binddn'] = root2
 replargs['bindpw'] = rootpw2
 replargs['win_subtree'] = adusersubtree + "," + suffix
@@ -363,35 +381,16 @@ time.sleep(5)
 
 print "repl status:", ds.getReplStatus(agmtdn)
 
-for ii in xrange(1,6):
-    ent = makeADUserEnt(ii)
-    try: ad.add_s(ent)
-    except ldap.ALREADY_EXISTS:
-        print "AD entry", ent.dn, "already exists"
-    setWindowsPwd(ad, ent.dn)
-    kk = ii % len(userAcctVals)
-    mod = []
-    for attr, val in userAcctVals[kk].iteritems():
-        mod.append((ldap.MOD_REPLACE, attr, str(val)))
-    ad.modify_s(ent.dn, mod)
-
-for ii in xrange(6,11):
-    ent = makeDSUserEnt(ii)
-    try: ds.add_s(ent)
-    except ldap.ALREADY_EXISTS:
-        print "DS entry", ent.dn, "already exists"
-
-print "Wait for sync to happen . . ."
-time.sleep(20)
-
 print "with ipa, new ds users are not added to AD - so we must add them now to AD in order for them to sync . . ."
-for ii in xrange(6,11):
-    ent = makeADUserEnt(ii)
-    try: ad.add_s(ent)
-    except ldap.ALREADY_EXISTS:
-        print "AD entry", ent.dn, "already exists"
-    setWindowsPwd(ad, ent.dn)
-    # need the password, but skip the accountcontrol stuff
+
+if ipawinsync:
+    for ii in xrange(6,11):
+        ent = makeADUserEnt(ii)
+        try: ad.add_s(ent)
+        except ldap.ALREADY_EXISTS:
+            print "AD entry", ent.dn, "already exists"
+        setWindowsPwd(ad, ent.dn)
+        # need the password, but skip the accountcontrol stuff
 
 print "Wait for sync to happen . . ."
 time.sleep(20)
@@ -403,15 +402,29 @@ for ii in xrange(1,11):
     filt = "(samaccountname=testuser%d)" % ii
     ents = ad.search_s(adusersubtree + "," + suffix, ldap.SCOPE_SUBTREE, filt)
     if not ents or len(ents) == 0 or not ents[0]:
-        raise "error: " + filt + " not found in AD"
+        raise Exception("error: " + filt + " not found in AD")
     adents.append(ents[0])
+    if ii > 5:
+        print "try binding with AD entries"
+        pwd = "Ornette1"
+        conn = ldap.initialize("ldap://%s" % host2)
+        try:
+            conn.simple_bind_s(ents[0].dn, pwd)
+            conn.unbind_s()
+            print "bind succeeded"
+        except:
+            print "bind failed"
+            print str(ents[0])
+
+print "hit Enter"
+sys.stdin.readline()
 
 print "make sure all entries are in DS . . ."
 for ii in xrange(1,11):
     filt = "(uid=testuser%d)" % ii
     ents = ds.search_s(usersubtree + "," + suffix, ldap.SCOPE_SUBTREE, filt, dsattrs)
     if not ents or len(ents) == 0 or not ents[0]:
-        raise "error: " + filt + " not found in DS"
+        raise Exception("error: " + filt + " not found in DS")
     dsents.append(ents[0])
 
 for dsent, adent in zip(dsents, adents):
@@ -436,7 +449,7 @@ for ii in xrange(1,11):
     filt = "(uid=testuser%d)" % ii
     ents = ds.search_s(usersubtree + "," + suffix, ldap.SCOPE_SUBTREE, filt, dsattrs)
     if not ents or len(ents) == 0 or not ents[0]:
-        raise "error: " + filt + " not found in DS"
+        raise Exception("error: " + filt + " not found in DS")
     dsent = ents[0]
     adent = adents[ii-1]
     if not entriesAreEqual(dsent, adent):
@@ -462,6 +475,9 @@ ent.setValues('objectclass', ['top', 'container'])
 ent.setValues(rdn[0], rdn[1])
 ad.add_s(ent)
 
+if ipawinsync:
+    sys.exit(0)
+
 print "add an entry to the DS"
 idnum = 100
 ent = makeDSUserEnt(idnum)
@@ -472,7 +488,7 @@ print "verify entry was added to AD"
 filt = "(samaccountname=testuser%d)" % idnum
 ents = ad.search_s(adusersubtree + "," + suffix, ldap.SCOPE_SUBTREE, filt)
 if not ents or len(ents) == 0 or not ents[0]:
-    raise "error: " + filt + " not found in AD"
+    raise Exception("error: " + filt + " not found in AD")
 adent = ents[0]
 
 print "verify DS entry has ntUniqueID"
