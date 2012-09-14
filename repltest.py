@@ -7,7 +7,8 @@ from dsadmin import DSAdmin, Entry
 
 host1 = "localhost.localdomain"
 host2 = host1
-cfgport = 1100
+port1 = 1389
+port2 = port1 + 1000
 
 m1replargs = {
 	'suffix': "dc=example,dc=com",
@@ -21,7 +22,7 @@ m1replargs = {
 m1 = DSAdmin.createAndSetupReplica({
 	'newrootpw': 'password',
 	'newhost': host1,
-	'newport': cfgport+10,
+	'newport': port1,
 	'newinst': 'm1',
 	'newsuffix': 'dc=example,dc=com',
     'no_admin': True
@@ -40,7 +41,7 @@ m2replargs = {
 m2 = DSAdmin.createAndSetupReplica({
 	'newrootpw': 'password',
 	'newhost': host2,
-	'newport': cfgport+20,
+	'newport': port2,
 	'newinst': 'm2',
 	'newsuffix': 'dc=example,dc=com',
     'no_admin': True
