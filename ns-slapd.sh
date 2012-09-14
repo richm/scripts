@@ -68,14 +68,7 @@ if [ $USE_GDB ]; then
 	;;
 	esac
 elif [ $USE_VALGRIND ]; then
-	case "$1" in
-	db2index|suffix2instance|db2archive|archive2db|db2ldif|ldif2db)
-	$CHECKCMD $SLAPD "$@"
-	;;
-	*)
-	$CHECKCMD $SLAPD -d 0 "$@" &
-    ;;
-    esac
+    $CHECKCMD $SLAPD "$@"
 elif [ -n "$USE_MUTRACE" ]; then
     case "$1" in
     db2index|suffix2instance|db2archive|archive2db|db2ldif|ldif2db)
