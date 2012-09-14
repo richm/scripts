@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: ASCII -*-
 """
 Copyright(C) 2006 INL
 Written by Victor Stinner <victor.stinner@inl.fr>
@@ -236,6 +235,13 @@ class InvalidReadError(UninitialisedValueError):
     def __str__(self):
         return BaseError.__str__(self) + "Invalid read: %s bytes" % self.bytes
 
+class InvalidWriteError(UninitialisedValueError):
+    """
+    "Invalid write of size (...)" error.
+    """
+    def __str__(self):
+        return BaseError.__str__(self) + "Invalid write: %s bytes" % self.bytes
+
 class ProgramError(BaseError):
     """
     "Process terminating with (...)" error.
@@ -284,10 +290,11 @@ class ValgrindParser(TextParser):
     regex_cond = re.compile(r"^%s Conditional jump or move depends on uninitialised value\(s\)$" % regex_pid)
     regex_uninit = re.compile(r"^%s Use of uninitialised value of size (%s)$" % (regex_pid, regex_num))
     regex_invalid_read = re.compile(r"^%s Invalid read of size (%s)$" % (regex_pid, regex_num))
+    regex_invalid_write = re.compile(r"^%s Invalid write of size (%s)$" % (regex_pid, regex_num))
     # ==14149== Syscall param pwrite64(buf) points to uninitialised byte(s)
     regex_param = re.compile(r"^%s Syscall param (\S+) points to uninitialised byte\(s\)$" % regex_pid)
     # ==17108==  Address 0xbc20b08 is 0 bytes after a block of size 128 alloc'd
-    regex_addr_alloc = re.compile(r"^%s  Address [0-9A-Fa-fx]+ is %s bytes (?:inside|after) a block of size %s alloc'd" % (regex_pid, regex_num, regex_num))
+    regex_addr_alloc = re.compile(r"^%s  Address [0-9A-Fa-fx]+ is %s bytes (?:inside|after) a block of size %s (?:alloc|free)'d" % (regex_pid, regex_num, regex_num))
     # ==18511==  Address 0xd5cb3c6 is not stack'd, malloc'd or (recently) free'd
     regex_addr_none = re.compile(r"^%s  Address [0-9A-Fa-fx]+ is not stack'd, malloc'd or \(recently\) free'd" % regex_pid)
     regex_unhandled = re.compile(r"^%s Warning: noted but unhandled ioctl (0x[0-9A-Fa-f]+) with no size/direction hints" % regex_pid)
@@ -366,6 +373,13 @@ class ValgrindParser(TextParser):
 #            print "found invalid read:", line
             size = match.group(1).replace(",", "")
             self.error = InvalidReadError(self.filename, int(size))
+            return self.parseBacktrace
+
+        match = self.regex_invalid_write.match(line)
+        if match:
+#            print "found invalid write:", line
+            size = match.group(1).replace(",", "")
+            self.error = InvalidWriteError(self.filename, int(size))
             return self.parseBacktrace
 
         match = self.regex_cond.match(line)
@@ -627,7 +641,7 @@ def displayErrors(errors, max_error=None, reverse=True, assupp=False):
 
     # create a table that maps to our desired comparison ordering
     # of classes - the order is given in the list errclasses
-    errclasses = [ProgramError, InvalidReadError, ParamError,
+    errclasses = [ProgramError, InvalidWriteError, InvalidReadError, ParamError,
                  UninitialisedValueError, ConditionalError, MemoryLeak]
     # We basically want to say something like
     # cmpval = classhash[class1][class2]
