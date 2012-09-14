@@ -1,7 +1,12 @@
 import sys
 import os
 import os.path
-from subprocess import Popen, PIPE, STDOUT
+haspopen = True
+try:
+    from subprocess import Popen, PIPE, STDOUT
+except ImportError:
+    import popen2
+    haspopen = False
 import base64
 import urllib
 import urllib2
@@ -49,11 +54,11 @@ class Entry:
         """data is the raw data returned from the python-ldap result method, which is
         a search result entry or a reference or None.
         If creating a new empty entry, data is the string DN."""
+        self.ref = None
         if entrydata:
             if isinstance(entrydata,tuple):
                 if entrydata[0] == None:
-                    print "skipping non-entry data"
-                    pprint.pprint(entrydata)
+                    self.ref = entrydata[1] # continuation reference
                 else:
                     self.dn = entrydata[0]
                     self.data = ldap.cidict.cidict(entrydata[1])
@@ -128,6 +133,8 @@ class Entry:
         of the tuple is the attribute name.  The second element is either a
         single value or a list of values."""
         return self.data.items()
+
+    def ref(self): return self.ref
 
     def __str__(self):
         """Convert the Entry to its LDIF representation"""
@@ -532,6 +539,8 @@ class DSAdmin(SimpleLDAPObject):
             cmdPat = 'slapd stopped.'
 
         timeout = timeout or 120 # default is 120 seconds
+        if "USE_GDB" in os.environ or "USE_VALGRIND" in os.environ:
+            timeout = timeout * 3
         timeout = int(time.time()) + timeout
         if cmd == 'stop':
             self.unbind()
@@ -1245,8 +1254,6 @@ class DSAdmin(SimpleLDAPObject):
             entry.setValues('nsds5ReplicaPurgeDelay', str(args['pd']))
         if args.has_key('referrals'):
             entry.setValues('nsds5ReplicaReferral', args['referrals'])
-        if args.has_key('fractional'):
-            entry.setValues('nsDS5ReplicatedAttributeList', args['fractional'])
         self.add_s(entry)
         entry = self.getEntry(dn, ldap.SCOPE_BASE)
         if not entry:
@@ -1365,6 +1372,10 @@ class DSAdmin(SimpleLDAPObject):
             entry.setValues('nsDS5ReplicatedAttributeList', args['fractional'])
         if args.has_key('auto_init'):
             entry.setValues('nsds5BeginReplicaRefresh', 'start')
+        if args.has_key('fractional'):
+            entry.setValues('nsDS5ReplicatedAttributeList', args['fractional'])
+        if args.has_key('stripattrs'):
+            entry.setValues('nsds5ReplicaStripAttrs', args['stripattrs'])
 
         self.setupWinSyncAgmt(repoth, args, entry)
         try:
@@ -1719,12 +1730,17 @@ class DSAdmin(SimpleLDAPObject):
         # local addresses
         thematch = re.compile('inet addr:' + ipadr)
         found = False
-        p = Popen(['/sbin/ifconfig', '-a'], stdout=PIPE)
-        for line in p.stdout:
+        if haspopen:
+            p = Popen(['/sbin/ifconfig', '-a'], stdout=PIPE)
+            child_stdout = p.stdout
+        else:
+            child_stdout, child_stdin = popen2.popen2(['/sbin/ifconfig', '-a'])
+        for line in child_stdout:
             if re.search(thematch, line):
                 found = True
                 break
-        p.wait()
+        if haspopen:
+            p.wait()
         return found
     isLocalHost = staticmethod(isLocalHost)
 
@@ -1936,18 +1952,27 @@ class DSAdmin(SimpleLDAPObject):
         env['NETSITE_ROOT'] = sroot
         env['CONTENT_LENGTH'] = str(length)
         progdir = os.path.dirname(prog)
-        pipe = Popen(prog, cwd=progdir, env=env, stdin=PIPE, stdout=PIPE, stderr=STDOUT)
-        pipe.stdin.write(content)
-        pipe.stdin.close()
-        for line in pipe.stdout:
+        if haspopen:
+            pipe = Popen(prog, cwd=progdir, env=env, stdin=PIPE, stdout=PIPE, stderr=STDOUT)
+            child_stdin = pipe.stdin
+            child_stdout = pipe.stdout
+        else:
+            saveenv = os.environ
+            os.environ = env
+            child_stdout, child_stdin = popen2.popen2(prog)
+            os.environ = saveenv
+        child_stdin.write(content)
+        child_stdin.close()
+        for line in child_stdout:
             if verbose: sys.stdout.write(line)
             ary = line.split(":")
             if len(ary) > 1 and ary[0] == 'NMC_Status':
                 exitCode = ary[1].strip()
                 break
-        pipe.stdout.close()
-        osCode = pipe.wait()
-        print "%s returned NMC code %s and OS code %s" % (prog, exitCode, osCode)
+        child_stdout.close()
+        if haspopen:
+            osCode = pipe.wait()
+            print "%s returned NMC code %s and OS code %s" % (prog, exitCode, osCode)
         return exitCode
     cgiFake = staticmethod(cgiFake)
 
@@ -2012,11 +2037,18 @@ SchemaFile= %s
         else:
             cmd.extend(['-l', '/dev/null'])
         cmd.extend(['-s', '-f', '-'])
-        pipe = Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=STDOUT)
-        pipe.stdin.write(content)
-        pipe.stdin.close()
+        if haspopen:
+            pipe = Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=STDOUT)
+            child_stdin = pipe.stdin
+            child_stdout = pipe.stdout
+        else:
+            pipe = popen2.Popen4(cmd)
+            child_stdin = pipe.tochild
+            child_stdout = pipe.fromchild
+        child_stdin.write(content)
+        child_stdin.close()
         while not pipe.poll():
-            (rr, wr, xr) = select.select([pipe.stdout], [], [], 1.0)
+            (rr, wr, xr) = select.select([child_stdout], [], [], 1.0)
             if rr and len(rr) > 0:
                 line = rr[0].readline()
                 if not line:
@@ -2024,7 +2056,7 @@ SchemaFile= %s
                 if verbose: sys.stdout.write(line)
             elif verbose:
                 print "timed out waiting to read from", cmd
-        pipe.stdout.close()
+        child_stdout.close()
         exitCode = pipe.wait()
         if verbose:
             print "%s returned exit code %s" % (prog, exitCode)
