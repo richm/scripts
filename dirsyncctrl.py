@@ -138,22 +138,27 @@ def main():
     adport = 389
     aduri = "ldap://%s:%d/" % (adhost, adport)
     suffix = "DC=testdomain,DC=com"
-    adroot = "cn=administrator,cn=users," + suffix
-    adrootpw = "Ornette1"
+    name = sys.argv[1]
+    pwd = sys.argv[2]
+#    adroot = "cn=Dirsync User,cn=users," + suffix
+#    adrootpw = "Secret123"
+    adroot = "cn=%s,cn=users,%s" % (name, suffix)
+    adrootpw = pwd
+    verbose = False
 
-    ldap.set_option(ldap.OPT_DEBUG_LEVEL, 15)
+#    ldap.set_option(ldap.OPT_DEBUG_LEVEL, 15)
     ad = LDAPObject(aduri)
     ad.simple_bind_s(adroot, adrootpw)
 
     # do initial dirsync search to get entries and the initial dirsync
     # cookie
     scope = ldap.SCOPE_SUBTREE
-    filter = '(objectclass=*)'
+    filt = '(objectclass=*)'
     attrlist = None
     dirsyncctrl = DirSyncCtrl()
     serverctrls = [dirsyncctrl]
 
-    msgid = ad.search_ext(suffix, scope, filter, attrlist, 0, serverctrls)
+    msgid = ad.search_ext(suffix, scope, filt, attrlist, 0, serverctrls)
     initiallist = {}
     # the dirsync control is returned with the LDAP_RES_SEARCH_RESULT
     #  def result3(self,msgid=_ldap.RES_ANY,all=1,timeout=None):
@@ -162,7 +167,8 @@ def main():
         print "Search returned %d results" % len(rdata)
         for dn, ent in rdata:
             print "dn: ", dn
-            pprint.pprint(ent)
+            if verbose:
+                pprint.pprint(ent)
         if rtype == ldap.RES_SEARCH_RESULT:
             dirsyncctrl.update(decoded_serverctrls)
             break
@@ -170,7 +176,7 @@ def main():
     # now search again with the updated dirsync control
     # we should get back no results since nothing in AD
     # has changed
-    msgid = ad.search_ext(suffix, scope, filter, attrlist, 0, serverctrls)
+    msgid = ad.search_ext(suffix, scope, filt, attrlist, 0, serverctrls)
     while True:
         (rtype, rdata, rmsgid, decoded_serverctrls) = ad.result3(msgid)
         print "Search returned %d results" % len(rdata)
@@ -184,7 +190,7 @@ def main():
     print "Change something on the AD side, and press Enter"
     sys.stdin.readline()
     print "Searching for changes . . ."
-    msgid = ad.search_ext(suffix, scope, filter, attrlist, 0, serverctrls)
+    msgid = ad.search_ext(suffix, scope, filt, attrlist, 0, serverctrls)
     while True:
         (rtype, rdata, rmsgid, decoded_serverctrls) = ad.result3(msgid)
         print "Search returned %d results" % len(rdata)
