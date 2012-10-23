@@ -18,6 +18,8 @@ global cont_count_threshold = 1 // report mutexes that had more than this many c
 global cont_max_threshold = 100000 // usec - report mutexes that had a max time more than this
 global verbose = 0
 global keep_stats = 1
+global starttime = 0
+global endtime = 0
 
 /* ... and a variant of the futexes.stp script: */
 global FUTEX_WAIT = 0 /*, FUTEX_WAKE = 1 */
@@ -90,10 +92,16 @@ probe syscall.futex.return {
   }
 }
 
+probe begin {
+  starttime = gettimeofday_us()
+  printf("======== BEGIN starttime %d\n", starttime)
+}
+
 probe end {
+  endtime = gettimeofday_us()
+  printf("======== END endtime %d elapsed time %d\n", endtime, endtime - starttime)
   if (!keep_stats) {
-    printf("======== END\n")
-    next
+    next // can skip the rest of this stuff
   }
   printf("<<<<<<<< aggregate stats\n")
   foreach (stack in mutex_cont_stack-) {
