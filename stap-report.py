@@ -78,6 +78,17 @@ class MutexStack:
     def get_conts_by_total(self):
         self.calcstats()
         return self.conts_by_total
+    def mergewith(self, msobj): # combine msobj with self
+        for mutex in msobj.mutexes.values(): self.addmutex(mutex)
+        self.count += msobj.count
+        self.total += msobj.total
+        if msobj.max > self.max: self.max = msobj.max
+        for stack, cont in msobj.conts.iteritems():
+            mycont = self.conts.setdefault(stack, cont)
+            if not mycont is cont: # stack already existed
+                mycont.count += cont.count
+                mycont.total += cont.total
+                if cont.max > mycont.max: mycont.max = cont.max
 
 class Mutex:
     def __init__(self, addr, stack=''):
@@ -126,6 +137,7 @@ def finalize_obj(curobj):
         mutexstack.addobj(curobj)
 
 # pass 1 - read the file and parse all of the mutex init and contentions
+print "Begin - parsing file", sys.argv[1]
 f = file(sys.argv[1])
 curobj = None
 instack = False
@@ -157,11 +169,8 @@ for line in f:
 f.close()
 finalize_obj(curobj)
 
-# pass 2 - sort the objects in various ways
-# unique list of stack objects that had a contention
-stack_list = [x for x in stack2msobj.values() if x.count > 0]
-
-# pass 3 - condense related stacks together e.g.
+print "Done parsing file - finding all contended stacks"
+# pass 2 - condense related stacks together e.g.
 # all db contentions usually are in
 # __db_tas_mutex_lock+0x11d [libdb-4.7.so]
 # malloc/free
@@ -171,22 +180,78 @@ stack_list = [x for x in stack2msobj.values() if x.count > 0]
 # malloc+0x66 [libc-2.12.so]
 # _L_lock_5189+0x10 [libc-2.12.so]
 # _int_free+0x40b [libc-2.12.so]
-
-msobj_by_count = sorted(stack_list, key=attrgetter('count'), reverse=True)
-msobj_by_max = sorted(stack_list, key=attrgetter('max'), reverse=True)
-msobj_by_total = sorted(stack_list, key=attrgetter('total'), reverse=True)
-
-db_stats = MutexStack()
 dbre = re.compile(r'__db_tas_mutex_lock\+0x11d')
-for msobj in stack_list:
-    if dbre.search(msobj.stack):
-        db_stats.count += msobj.count
-        if msobj.max > db_stats.max: db_stats.max = msobj.max
-        db_stats.total += msobj.total
+mallocre = re.compile(r'malloc\+0x66 \[libc')
+freere = re.compile(r'_int_free\+0x40b')
+reallocre = re.compile(r'__libc_realloc\+0xd4')
+callocre = re.compile(r'__libc_calloc\+0x8b')
+dbidx = -1
+allocfreeidx = -1
+stack_list = []
+for stack, msobj in stack2msobj.iteritems():
+    if msobj.count < 1: continue
+    if dbre.search(stack):
+        if dbidx < 0:
+            dbidx = len(stack_list) # index of appended msobj
+            stack_list.append(msobj)
+        else:
+            stack_list[dbidx].mergewith(msobj)
+    elif mallocre.search(stack) or freere.search(stack) or reallocre.search(stack) or callocre.search(stack):
+        if allocfreeidx < 0:
+            allocfreeidx = len(stack_list) # index of appended msobj
+            stack_list.append(msobj)
+        else:
+            stack_list[allocfreeidx].mergewith(msobj)
+    else:
+        stack_list.append(msobj)
 
-print "Top Ten mutex stacks by number of contentions"
-for ii in xrange(0,10): print msobj_by_count[ii]
-print "Top Ten mutex stacks by total contention time"
-for ii in xrange(0,10): print msobj_by_total[ii]
+print "Found", len(stack_list), "contended stacks - sorting"
+# pass 3 - sort by stats
+msobj_by_count = sorted(stack_list, key=attrgetter('count'), reverse=True)
+#msobj_by_max = sorted(stack_list, key=attrgetter('max'), reverse=True)
+#msobj_by_total = sorted(stack_list, key=attrgetter('total'), reverse=True)
 
-print "Database contention stats:", db_stats
+#print "Top Ten mutex stacks by number of contentions"
+#for ii in xrange(0,10): print msobj_by_count[ii]
+#print "Top Ten mutex stacks by total contention time"
+#for ii in xrange(0,10): print msobj_by_total[ii]
+
+outdir = '/var/tmp/stacks'
+sumf = open('%s/Summary.csv' % outdir, 'w')
+mistacksf = open('%s/MutexInitStacks.csv' % outdir, 'w')
+print "Writing report CSV files to", outdir
+
+sumf.write('Note: all libdb contentions on __db_tas_mutex_lock+0x11d have been merged\n')
+sumf.write('Note: all malloc/realloc/calloc/free libc contentions have been merged\n')
+sumf.write('The mutex init list contains all of the individual stacktraces at the end\n')
+sumf.write('Init Stack,Cont. Stacks,Count,Total time (usec),Max time (usec),Notes\n')
+for ii in xrange(0, len(msobj_by_count)):
+    msobj = msobj_by_count[ii]
+    initstack = 'initstack-%d' % ii
+    contstack = 'contstacks-%d' % ii
+    sumf.write('%s,%s,%d,%d,%d,\n' % (initstack, contstack, msobj.count, msobj.total, msobj.max))
+    mistacksf.write('%s\n%s\n' % (initstack, msobj.stack))
+    f = open('%s/%s.csv' % (outdir, initstack), 'w')
+    f.write('%s\nContention stacks and stats for initstack %s\n' % (contstack, initstack))
+    f.write('Location,Count,Total time (usec),Max time (usec)\n')
+    cont_by_count = msobj.get_conts_by_count()
+    for jj in xrange(0, len(cont_by_count)):
+        cont = cont_by_count[jj]
+        f.write('contstack-%d,%d,%d,%d\n' % (jj, cont.count, cont.total, cont.max))
+    f.write('\nstacks in order of descending number of contentions\n\n')
+    for jj in xrange(0, len(cont_by_count)):
+        cont = cont_by_count[jj]
+        f.write('contstack-%d\n%s\n' % (jj, cont.stack))
+    f.close()
+
+sumf.close()
+mistacksf.write('All database init/first seen stacks:\n')
+for stack, msobj in stack2msobj.iteritems():
+    if dbre.search(stack):
+        mistacksf.write('%s\n' % msobj.stack)
+
+mistacksf.write('All alloc/free init/first seen stacks:\n')
+for stack, msobj in stack2msobj.iteritems():
+    if mallocre.search(stack) or freere.search(stack) or reallocre.search(stack) or callocre.search(stack):
+        mistacksf.write('%s\n' % msobj.stack)
+mistacksf.close()
