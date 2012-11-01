@@ -183,6 +183,7 @@ print "Done parsing file - finding all contended stacks"
 dbre = re.compile(r'__db_tas_mutex_lock\+0x11d')
 mallocre = re.compile(r'malloc\+0x66 \[libc')
 freere = re.compile(r'_int_free\+0x40b')
+free2re = re.compile(r'_int_free\+0x412')
 reallocre = re.compile(r'__libc_realloc\+0xd4')
 callocre = re.compile(r'__libc_calloc\+0x8b')
 dbidx = -1
@@ -196,7 +197,8 @@ for stack, msobj in stack2msobj.iteritems():
             stack_list.append(msobj)
         else:
             stack_list[dbidx].mergewith(msobj)
-    elif mallocre.search(stack) or freere.search(stack) or reallocre.search(stack) or callocre.search(stack):
+    elif mallocre.search(stack) or freere.search(stack) or reallocre.search(stack) or \
+         callocre.search(stack) or free2re.search(stack):
         if allocfreeidx < 0:
             allocfreeidx = len(stack_list) # index of appended msobj
             stack_list.append(msobj)
