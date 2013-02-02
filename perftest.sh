@@ -196,7 +196,7 @@ domod1() { LDCLTFLT=${LDCLTFLT:-$LDCLTFLT1} domod "$MODSUF1" ; }
 domod2() { LDCLTFLT=${LDCLTFLT:-$LDCLTFLT2} domod "$MODSUF2" ; }
 
 gnuplotheader='
-set terminal png font "'$GPFONT'" 11 size 1700,1800
+set terminal png font "'$GPFONT'" 12 size 1700,1800
 set xlabel "Time"
 set xdata time
 set timefmt "%s"
@@ -251,7 +251,7 @@ set size 1.0,0.45
 set origin 0.0,0.0
 set logscale y
 set ylabel "ops/sec (logarithmic)"
-$gpstr
+replot
 unset multiplot
 EOF
 }
@@ -305,7 +305,8 @@ set size 1.0,0.45
 set origin 0.0,0.0
 set logscale y
 set ylabel "ops/sec (logarithmic)"
-$gpstr
+$gphead
+replot
 unset multiplot
 EOF
 }
@@ -500,7 +501,7 @@ set size 1.0,0.45
 set origin 0.0,0.0
 set logscale y
 set ylabel "ops/sec (logarithmic)"
-$gpstr
+replot
 unset multiplot
 EOF
 }
