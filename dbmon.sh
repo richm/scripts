@@ -29,8 +29,8 @@ dodbmon() {
         /^nsslapd-db-page-ro-evict-rate/ { dbroevict=$2 }
         /^nsslapd-db-pages-in-use/ { dbpages=$2 }
         /^dn: cn=monitor, *cn=[a-zA-Z0-9][a-zA-Z0-9]*, *cn=ldbm database, *cn=plugins, *cn=config/ {
-            dbname=$5
-            if (tolower(dbname) in dbnames) {
+            dbname=tolower($5)
+            if (dbname in dbnames) {
                 len=length(dbname) ; if (len > maxdbnamelen) { maxdbnamelen=len }
             }
         }
@@ -46,7 +46,7 @@ dodbmon() {
             if (verbose > 1) {
                 print "# dbcachefree - free bytes in dbcache"
                 print "# free% - percent free in dbcache"
-                print "# roevicts - number of read-only pages dropped from cache to make room for other pages
+                print "# roevicts - number of read-only pages dropped from cache to make room for other pages"
                 print "#            if this is non-zero, it means the dbcache is maxed out and there is page churn"
                 print "# hit% - percent of requests that are served by cache"
             }
@@ -78,7 +78,7 @@ dodbmon() {
                 freep=free/max*100
                 size=cur/cnt
                 fmtstr = sprintf("%%%d.%ds %%10d %%13d %%6.1f %%7.1f\n", maxdbnamelen, maxdbnamelen)
-                printf fmtstr, dbn, cnt, free, freep, size
+                printf fmtstr, dbnames[dbn], cnt, free, freep, size
                 if (havednstats) {
                     dcur=stats[dbn,"dncur"]
                     dmax=stats[dbn,"dnmax"]
