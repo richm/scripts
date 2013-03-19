@@ -1818,6 +1818,7 @@ class DSAdmin(SimpleLDAPObject):
     ###########################
     # Static methods start here
     ###########################
+    @staticmethod
     def normalizeDN(dn,usespace=False):
         # not great, but will do until we use a newer version of python-ldap
         # that has DN utilities
@@ -1825,32 +1826,32 @@ class DSAdmin(SimpleLDAPObject):
         joinstr = ","
         if usespace: joinstr = ", "
         return joinstr.join(ary)
-    normalizeDN = staticmethod(normalizeDN)
 
+    @staticmethod
     def escapeDNValue(dn):
         '''convert special characters in a DN into LDAPv3 escapes e.g.
         "dc=example,dc=com" -> \"dc\=example\,\ dc\=com\"'''
         for cc in (' ', '"', '+', ',', ';', '<', '>', '='):
             dn = dn.replace(cc, '\\' + cc)
         return dn
-    escapeDNValue = staticmethod(escapeDNValue)
 
+    @staticmethod
     def escapeDNFiltValue(dn):
         '''convert special characters in a DN into LDAPv3 escapes
         for use in search filters'''
         for cc in (' ', '"', '+', ',', ';', '<', '>', '='):
             dn = dn.replace(cc, '\\%x' % ord(cc))
         return dn
-    escapeDNFiltValue = staticmethod(escapeDNFiltValue)
 
+    @staticmethod
     def suffixfilt(suffix):
         nsuffix = DSAdmin.normalizeDN(suffix)
         escapesuffix = DSAdmin.escapeDNFiltValue(nsuffix)
         spacesuffix = DSAdmin.normalizeDN(nsuffix, True)
         filt = '(|(cn=%s)(cn=%s)(cn=%s)(cn="%s")(cn="%s")(cn=%s)(cn="%s"))' % (escapesuffix, nsuffix, spacesuffix, nsuffix, spacesuffix, suffix, suffix)
         return filt
-    suffixfilt = staticmethod(suffixfilt)
 
+    @staticmethod
     def isLocalHost(hname):
         # first see if this is a "well known" local hostname
         if hname == 'localhost' or hname == 'localhost.localdomain':
@@ -1882,12 +1883,12 @@ class DSAdmin(SimpleLDAPObject):
         if HASPOPEN:
             p.wait()
         return found
-    isLocalHost = staticmethod(isLocalHost)
 
+    @staticmethod
     def getfqdn(name=''):
         return socket.getfqdn(name)
-    getfqdn = staticmethod(getfqdn)
 
+    @staticmethod
     def getdomainname(name=''):
         fqdn = DSAdmin.getfqdn(name)
         index = fqdn.find('.')
@@ -1895,16 +1896,16 @@ class DSAdmin(SimpleLDAPObject):
             return fqdn[index+1:]
         else:
             return fqdn
-    getdomainname = staticmethod(getdomainname)
 
+    @staticmethod
     def getdefaultsuffix(name=''):
         dm = DSAdmin.getdomainname(name)
         if dm:
             return "dc=" + dm.replace('.', ',dc=')
         else:
             return 'dc=localdomain'
-    getdefaultsuffix = staticmethod(getdefaultsuffix)
 
+    @staticmethod
     def getnewhost(args):
         """One of the arguments to createInstance is newhost.  If this is specified, we need
         to convert it to the fqdn.  If not given, we need to figure out what the fqdn of the
@@ -1918,8 +1919,8 @@ class DSAdmin(SimpleLDAPObject):
             isLocal = True
             args['newhost'] = DSAdmin.getfqdn()
         return isLocal
-    getnewhost = staticmethod(getnewhost)
 
+    @staticmethod
     def getoldcfgdsinfo(args):
         """Use the old style sroot/shared/config/dbswitch.conf to get the info"""
         dbswitch = open("%s/shared/config/dbswitch.conf" % args['sroot'], 'r')
@@ -1938,8 +1939,8 @@ class DSAdmin(SimpleLDAPObject):
                     return ary
         finally:
             dbswitch.close()
-    getoldcfgdsinfo = staticmethod(getoldcfgdsinfo)
 
+    @staticmethod
     def getnewcfgdsinfo(args):
         """Use the new style prefix/etc/dirsrv/admin-serv/adm.conf"""
         url = LDAPUrl(args['admconf'].ldapurl)
@@ -1950,8 +1951,8 @@ class DSAdmin(SimpleLDAPObject):
             ary[1] = int(ary[1])
         ary.append(url.dn)
         return ary
-    getnewcfgdsinfo = staticmethod(getnewcfgdsinfo)
 
+    @staticmethod
     def getcfgdsinfo(args):
         """We need the host and port of the configuration directory server in order
         to create an instance.  If this was not given, read the dbswitch.conf file
@@ -1966,13 +1967,13 @@ class DSAdmin(SimpleLDAPObject):
                 return DSAdmin.getoldcfgdsinfo(args)
         else:
             return args['cfgdshost'], int(args['cfgdsport']), DSAdmin.CFGSUFFIX
-    getcfgdsinfo = staticmethod(getcfgdsinfo)
 
+    @staticmethod
     def is_a_dn(dn):
         """Returns True if the given string is a DN, False otherwise."""
         return (dn.find("=") > 0)
-    is_a_dn = staticmethod(is_a_dn)
 
+    @staticmethod
     def getcfgdsuserdn(cfgdn,args):
         """If the config ds user ID was given, not the full DN, we need to figure
         out what the full DN is.  Try to search the directory anonymously first.  If
@@ -2005,8 +2006,8 @@ class DSAdmin(SimpleLDAPObject):
             conn = DSAdmin(args['cfgdshost'], args['cfgdsport'], args['cfgdsuser'],
                            args['cfgdspwd'])
         return conn
-    getcfgdsuserdn = staticmethod(getcfgdsuserdn)
 
+    @staticmethod
     def getserverroot(cfgconn, isLocal, args):
         """Grab the serverroot from the instance dir of the config ds if the user
         did not specify a server root directory"""
@@ -2015,8 +2016,8 @@ class DSAdmin(SimpleLDAPObject):
                                    [ 'nsslapd-instancedir' ])
             if ent:
                 args['sroot'] = os.path.dirname(ent.getValue('nsslapd-instancedir'))
-    getserverroot = staticmethod(getserverroot)
 
+    @staticmethod
     def getadmindomain(isLocal,args):
         """Get the admin domain to use."""
         if isLocal and not args.has_key('admin_domain'):
@@ -2029,8 +2030,8 @@ class DSAdmin(SimpleLDAPObject):
                     if len(ary) > 1 and ary[0] == 'AdminDomain':
                         args['admin_domain'] = ary[1].strip()
                 dsconf.close()
-    getadmindomain = staticmethod(getadmindomain)
 
+    @staticmethod
     def getadminport(cfgconn,cfgdn,args):
         """Get the admin server port so we can contact it via http.  We get this from
         the configuration entry using the CFGSUFFIX and cfgconn.  Also get any other
@@ -2063,8 +2064,8 @@ class DSAdmin(SimpleLDAPObject):
                         args['newuserid'] = ent.nsSuiteSpotUser
             cfgconn.unbind()
         return asport, secure
-    getadminport = staticmethod(getadminport)
 
+    @staticmethod
     def getserveruid(args):
         if not args.has_key('newuserid'):
             if args.has_key('admconf'):
@@ -2080,8 +2081,8 @@ class DSAdmin(SimpleLDAPObject):
             args['newuserid'] = os.environ['LOGNAME']
             if args['newuserid'] == 'root':
                 args['newuserid'] = DSAdmin.DEFAULT_USER_ID
-    getserveruid = staticmethod(getserveruid)
 
+    @staticmethod
     def cgiFake(sroot,verbose,prog,args):
         """Run the local program prog as a CGI using the POST method."""
         content = urllib.urlencode(args)
@@ -2114,8 +2115,8 @@ class DSAdmin(SimpleLDAPObject):
             osCode = pipe.wait()
             print "%s returned NMC code %s and OS code %s" % (prog, exitCode, osCode)
         return exitCode
-    cgiFake = staticmethod(cgiFake)
 
+    @staticmethod
     def formatInfData(args):
         """Format args data for input to setup or migrate taking inf style data"""
         content = """[General]
@@ -2167,8 +2168,8 @@ SchemaFile= %s
             content = content + "ldapifilepath= " + args['ldapifilepath'] + "\n"
 
         return content
-    formatInfData = staticmethod(formatInfData)
 
+    @staticmethod
     def runInfProg(prog,content,verbose):
         """run a program that takes an .inf style file on stdin"""
         cmd = [prog]
@@ -2201,8 +2202,8 @@ SchemaFile= %s
         if verbose:
             print "%s returned exit code %s" % (prog, exitCode)
         return exitCode        
-    runInfProg = staticmethod(runInfProg)
 
+    @staticmethod
     def cgiPost(host, port, username, password, uri, verbose, secure, args):
         """Post the request to the admin server.  Admin server requires authentication,
         so we use the auth handler classes.  NOTE: the url classes in python use the
@@ -2249,16 +2250,16 @@ SchemaFile= %s
             # restore binsize
             base64.MAXBINSIZE = savedbinsize
         return exitCode            
-    cgiPost = staticmethod(cgiPost)
 
+    @staticmethod
     def getsbindir(sroot,prefix):
         if sroot:
             return "%s/bin/slapd/admin/bin" % sroot
         elif prefix:
             return "%s/sbin" % prefix
         return "/usr/sbin"
-    getsbindir = staticmethod(getsbindir)
 
+    @staticmethod
     def createInstance(args):
         """Create a new instance of directory server.  First, determine the hostname to use.  By
         default, the server will be created on the localhost.  Also figure out if the given
@@ -2392,12 +2393,12 @@ SchemaFile= %s
             newconn.cfgdsuser = args['cfgdsuser']
             newconn.cfgdspwd = args['cfgdspwd']
         return newconn
-    createInstance = staticmethod(createInstance)
 
-    # pass this sub two dicts - the first one is a dict suitable to create
-    # a new instance - see createInstance for more details
-    # the second is a dict suitable for replicaSetupAll - see replicaSetupAll
+    @staticmethod
     def createAndSetupReplica(createArgs, repArgs):
+        # pass this sub two dicts - the first one is a dict suitable to create
+        # a new instance - see createInstance for more details
+        # the second is a dict suitable for replicaSetupAll - see replicaSetupAll
         conn = DSAdmin.createInstance(createArgs)
         if not conn:
             print "Error: could not create server", createArgs
@@ -2405,7 +2406,6 @@ SchemaFile= %s
 
         conn.replicaSetupAll(repArgs)
         return conn
-    createAndSetupReplica = staticmethod(createAndSetupReplica)
 
 def testit():
     host = 'localhost'
