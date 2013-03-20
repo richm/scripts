@@ -121,6 +121,13 @@ class Req(object):
                                            time.strftime(ts_fmt_audit, time.localtime(self.auditts)),
                                            self.conn, self.op)
     def __repr__(self): return str(self)
+    def same(self, oth, skipts=False):
+        if skipts: ret = True
+        else: ret = self.ts == oth.ts
+        if ret: ret = self.__class__ == oth.__class__
+        if ret: ret = self.conn == oth.conn
+        if ret: ret = self.op == oth.op
+        return ret
 
 class UnbindReq(Req):
     def __init__(self, match=None):
@@ -137,6 +144,10 @@ class DNReq(Req):
     def __str__(self):
         return Req.__str__(self) + ' dn="' + self.dn + '"'
     def __repr__(self): return str(self)
+    def same(self, oth, skipts=False):
+        ret = Req.same(self, oth, skipts)
+        if ret: ret = self.dn == oth.dn
+        return ret
 
 class BindReq(DNReq):
     def __init__(self, match=None):
@@ -171,6 +182,10 @@ class AddReq(DNReq):
     def __str__(self):
         return DNReq.__str__(self) + ' ADD'
     def __repr__(self): return str(self)
+    def same(self, oth, skipts=False):
+        ret = DNReq.same(self, oth, skipts)
+        if ret: ret = self.ent == oth.ent
+        return ret
 
 class ModReq(DNReq):
     def __init__(self, dn=None, tsstr=None, conn=None, op=None, auditts=None, mods=None, match=None):
@@ -181,6 +196,10 @@ class ModReq(DNReq):
     def __str__(self):
         return DNReq.__str__(self) + ' MOD'
     def __repr__(self): return str(self)
+    def same(self, oth, skipts=False):
+        ret = DNReq.same(self, oth, skipts)
+        if ret: ret = self.mods == oth.mods
+        return ret
 
 class DelReq(DNReq):
     def __init__(self, dn=None, tsstr=None, conn=None, op=None, auditts=None, match=None):
@@ -205,18 +224,26 @@ class MdnReq(DNReq):
     def __str__(self):
         return DNReq.__str__(self) + ' MODRDN newrdn="%s" deleteoldrdn=%d newsuperior="%s"' % (self.newrdn, self.deleteoldrdn, self.newsuperior)
     def __repr__(self): return str(self)
+    def same(self, oth, skipts=False):
+        ret = DNReq.same(self, oth, skipts)
+        if ret:
+            ret = (self.newrdn, self.newsuperior, self.deleteolrdn) == (oth.newrdn, oth.newsuperior, oth.deleteolrdn)
+        return ret
 
 class Res(object):
-    def __init__(self, match=None):
-        if match.lastindex == 4:
-            ts, conn, op, errnum = match.groups()
-        else:
-            ts, conn, op = match.groups()
-            errnum = '0'
-        self.ts = int(time.mktime(time.strptime(ts, ts_fmt_access)))
-        self.conn = conn
-        self.op = op
-        self.errnum = errnum
+    def __init__(self, match=None, fields=None):
+        if match:
+            if match.lastindex == 4:
+                ts, conn, op, errnum = match.groups()
+            else:
+                ts, conn, op = match.groups()
+                errnum = '0'
+            self.ts = int(time.mktime(time.strptime(ts, ts_fmt_access)))
+            self.conn = conn
+            self.op = op
+            self.errnum = errnum
+        elif fields:
+            self.ts, self.conn, self.op, self.errnum = fields
     def __str__(self):
         return 'RESULT ts=%s %s %s err=%s' % (time.strftime(ts_fmt_access, time.localtime(self.ts)),
                                               self.conn, self.op, self.errnum)
@@ -434,13 +461,22 @@ def is_mod(rec):
     return rec and (getChangeType(rec)[0] != NOT_A_MOD)
 
 def is_del(rec):
-    return rec and (len(rec) == 2) and ('time' in rec) and ('modifiersname' in rec)
+    return rec and (len(rec) <= 2) and ('time' in rec) and ((len(rec) == 1) or ((len(rec) == 2) and ('modifiersname' in rec)))
 
 def is_mdn(rec):
     return rec and (('newrdn' in rec) or ('deleteoldrdn' in rec) or ('newsuperior' in rec))
 
 def is_add(rec):
     return rec and ('objectclass' in rec)
+
+# -
+# time: 20121126230007: dn: some=dn,some=suffix
+# look for a value of a timestamp followed by a ": dn:"
+# just skip it
+bogusre = re.compile(r'^%s: dn: .*$' % regex_num)
+def is_bogus(rec):
+    tsstr = rec.get('time', [None])[0]
+    return tsstr and bogusre.match(tsstr)
 
 def parseRec(rec):
     tsstr = rec.get('time', [None])[0]
@@ -452,49 +488,80 @@ def parseRec(rec):
         return (tsstr, ldap.REQ_ADD, ldif2add(rec))
     if is_mdn(rec):
         return (tsstr, ldap.REQ_MODRDN, ldif2mdn(rec))
-    raise Exception(str(rec) + " is an unknown type")
+    return (tsstr, -1, None)
+
+def isIncomplete(dn, ent):
+    return dn == None and not 'time' in ent
+
+def appendEnt(req, ent):
+    req.ent.extend(ent.iteritems())
 
 # ops from the audit log, indexed by timestamp
 # key is timestamp, val is a list of ops
 auditops = {}
-def addAuditOp(req):
-    auditops.setdefault(req.auditts, []).append(req)
 
-def parseAudit(fname):
-    f = open(fname)
-    lrl = ldif.LDIFRecordList(f)
-    lrl.parse()
-    f.close()
-    modlist = []
-    savets = None
-    savedn = None
-    for dn,ent in lrl.all_records:
+class AuditParser(ldif.LDIFParser):
+    def __init__(self, input_file, min_entry=0, ignored_attr_types=None, max_entries=0, process_url_schemes=None, line_sep='\n'):
+        ldif.LDIFParser.__init__(self, input_file, ignored_attr_types, max_entries, process_url_schemes, line_sep)
+        self.min_entry = min_entry
+        self.auditops = {}
+        self.modlist = []
+        self.savets = None
+        self.savedn = None
+        self.lastreq = None
+    def handle(self, dn, ent):
+        if self.records_read < self.min_entry: return
+        # some ldap servers which will remain nameless generate bogus audit logs with empty lines
+        # in the middle of a record - we detect this situation and just append the records to the
+        # last request's records
+        if not dn and is_bogus(ent): return
         ts, optype, data = parseRec(ldap.cidict.cidict(ent))
-        if optype == ldap.REQ_MODIFY:
+        if optype == -1 and isIncomplete(dn, ent):
+            if not self.lastreq:
+                raise Exception("Error: found incomplete record but no previous record to append to")
+            if isinstance(self.lastreq, AddReq):
+                appendEnt(self.lastreq, ent)
+            else:
+                raise Exception("Error: incomplete record was not an Add Request: " + str(self.lastreq) + ":" + str(ent))
+        elif optype == -1:
+            raise Exception("Error: unknown operation: " + str(dn) + ":" + str(ent))
+        elif optype == ldap.REQ_MODIFY:
             if data[1]: # do not add stripped mods
                 if dn:
-                    if modlist:
-                        addAuditOp(ModReq(savedn, auditts=savets, mods=modlist))
-                    modlist, savets, savedn = ([data], ts, dn)
+                    if self.modlist:
+                        self.lastreq = ModReq(self.savedn, auditts=self.savets, mods=self.modlist)
+                        self.handleAuditReq(self.lastreq)
+                    self.modlist, self.savets, self.savedn = ([data], ts, dn)
                 else: # continuation
-                    modlist.append(data)
-            elif dn and not savedn: # but save ts and dn in case the first mod is stripped
-                modlist, savets, savedn = ([], ts, dn)
+                    self.modlist.append(data)
+            elif dn and not self.savedn: # but save ts and dn in case the first mod is stripped
+                self.modlist, self.savets, self.savedn = ([], ts, dn)
         else:
-            if modlist:
-                addAuditOp(ModReq(dn, auditts=savets, mods=modlist))
-            modlist, savets, savedn = ([], None, None)
+            if self.modlist:
+                # "flush" pending modify request
+                self.handleAuditReq(ModReq(self.savedn, auditts=self.savets, mods=self.modlist))
+                self.modlist, self.savets, self.savedn = ([], None, None)
             if optype == ldap.REQ_ADD:
-                req = AddReq(dn, auditts=ts, ent=data)
+                self.lastreq = AddReq(dn, auditts=ts, ent=data)
             elif optype == ldap.REQ_MODRDN:
-                req = MdnReq(dn, auditts=ts, newrdn=data.get('newrdn', None),
+                self.lastreq = MdnReq(dn, auditts=ts, newrdn=data.get('newrdn', None),
                              deleteoldrdn=data.get('deleteoldrdn', None),
                              newsuperior=data.get('newsuperior', None))
             elif optype == ldap.REQ_DELETE:
-                req = DelReq(dn, auditts=ts)
-            addAuditOp(req)
-    if modlist and savedn and savets:
-        addAuditOp(ModReq(savedn, auditts=savets, mods=modlist))
+                self.lastreq = DelReq(dn, auditts=ts)
+            self.handleAuditReq(self.lastreq)
+    def parse(self):
+        ldif.LDIFParser.parse(self)
+        if self.modlist and self.savedn and self.savets:
+            self.handleAuditReq(ModReq(self.savedn, auditts=self.savets, mods=self.modlist))
+            self.modlist, self.savets, self.savedn = ([], None, None)
+    def handleAuditReq(self, req): # subclass should override this
+        self.auditops.setdefault(req.auditts, []).append(req)
+
+def parseAudit(f, start=0, finish=sys.maxint):
+    ap = AuditParser(f, min_entry=start, max_entries=finish)
+    ap.parse()
+    auditops.update(ap.auditops)
 
 def findAuditReq(op):
     req = None
@@ -577,19 +644,50 @@ def parseAccessLine(line):
 
     return True # no match
 
-def parseAccess(fname, startoff, endoff):
+def parseAccess(f, startoff, endoff):
     lineno = 0
-    f = open(fname)
     for line in f:
         lineno = lineno + 1
         if lineno >= startoff and lineno <= endoff:
             parseAccessLine(line)
-    f.close()
 
-startoff = int(sys.argv[3])
-endoff = int(sys.argv[4])
+if __name__ == '__main__':
+    from argparse import ArgumentParser
+    parser = ArgumentParser()
+    parser.add_argument('-c', '--access', nargs='+', type=file, help='access log files - will be parsed in the order given')
+    parser.add_argument('-u', '--audit', nargs='+', type=file, help='audit log files - will be parsed in the order given')
+    parser.add_argument('-b', '--accessbegin', type=int, help='beginning access log line', default=0)
+    parser.add_argument('-e', '--accessend', type=int, help='ending access log line', default=sys.maxint)
+    parser.add_argument('-s', '--auditstart', type=int, help='starting audit log record number', default=0)
+    parser.add_argument('-f', '--auditfinish', type=int, help='ending audit log record number', default=sys.maxint)
+    parser.add_argument('-v', action='count', help='repeat for more verbosity', default=0)
+    args = parser.parse_args()
 
-# if not audit log is provided, can only replay connect/bind/search requests
-if sys.argv[2] and len(sys.argv[2]):
-    parseAudit(sys.argv[2])
-parseAccess(sys.argv[1], startoff, endoff)
+    if len(args.c) == 0 and len(args.u) == 0:
+        print "Error: no audit or access logs given"
+        sys.exit(1)
+
+    for ii in xrange(0, len(args.u)):
+        start, finish = (0, sys.maxint)
+        if ii == 0: start = args.s
+        if ii == len(args.u)-1: finish = args.f
+        parseAudit(args.u[ii], start, finish)
+
+    naccess = len(args.c)
+    opid = 0
+    if naccess == 0: # need dummy conn for audit log only
+        conn = Conn('unknown', None, '', '', 'unknown')
+        # sort audit log ops by timestamp
+        for k in sorted(auditops.iterkeys()):
+            opary = auditops[k]
+            # these are actually Req's not Op's
+            for op in opary:
+                conn.addreq(op)
+                conn.addres(Res(op.ts, '0', str(opid), '0'))
+                opid += 1
+
+    for ii in xrange(0, naccess):
+        begin, end = (0, sys.maxint)
+        if ii == 0: begin = args.b
+        if ii == naccess-1: end = args.e
+        parseAccess(args.c[ii], begin, end)
