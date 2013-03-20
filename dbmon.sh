@@ -64,7 +64,7 @@ dodbmon() {
         /^dbfilename-/ {
             #dbfilename-3: userRoot/id2entry.db4
             if (dbname in dbnames) {
-                split($0, idxline, /[- :/.]+/)
+                split($0, idxline, /[ :/.-]+/)
                 idxname=tolower(idxline[4])
                 dbn = tolower(idxline[3])
                 if ((dbn == dbname) && (allindex || (idxname in idxnames))) {
