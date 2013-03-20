@@ -2,6 +2,16 @@ import sys
 import re
 import copy
 from operator import  attrgetter
+from subprocess import Popen, PIPE, STDOUT
+from argparse import ArgumentParser, REMAINDER
+
+parser = ArgumentParser()
+parser.add_argument('-f', action='append', help='exe or shared object containing symbols')
+parser.add_argument('-p', type=int, default=0, help='process id of running process')
+parser.add_argument('files', nargs=REMAINDER, help='stap output files')
+args = parser.parse_args()
+exeliblist = args.f or []
+files = args.files
 
 np = '[0-9]+' # number pattern
 hp = '0x[a-zA-Z0-9]+' # hex pattern
@@ -15,6 +25,7 @@ lastcontre = re.compile(r'^mutex was last contended at$')
 initre = re.compile(r'^init (%s) at$' % hp)
 contre = re.compile(r'^contention (%s) elapsed (%s) at$' % (hp, np))
 endre = re.compile(r'^======== END$')
+warnre = re.compile(r'^WARNING:.*')
 
 # key is the mutex address e.g. 0xdeadbeef
 # value is a stack trace of mutex init
@@ -23,6 +34,121 @@ addr2stack = {}
 # value is the mutexstack object for this stack
 stack2msobj = {}
 unique_stacks = {}
+
+# key is so name
+# val is the pipe to the addr2line process for that so
+addr2linepipes = {}
+addr2funcfileline = {}
+# key is a string produced by ubacktrace() (not sprint_ubacktrace()) - a line of
+# hex function addresses + offsets
+# value is 
+unique_hex_stacks = {}
+
+procmap = []
+mapaddr2offsetso = {}
+def getprocmap(pid):
+    global procmap
+    f = file("/proc/%d/maps" % pid)
+    for line in f:
+        ary = re.split(" +", line)
+        sstart, send = ary[0].split("-")
+        start, end = (int(sstart, 16), int(send, 16))
+        idx = ary[5].find(".#prelink")
+        if idx > 0:
+            so = ary[5][0:idx].strip()
+        else:
+            so = ary[5].strip()
+        procmap.append((start, end, so))
+    f.close()
+
+def addr2offsetso(pid,addr):
+    global procmap
+    global mapaddr2offsetso
+    if addr in mapaddr2offsetso:
+        return mapaddr2offsetso[addr]
+    if not procmap: getprocmap(pid)
+    ret = (0, "")
+    try:
+        val = int(addr, 16)
+    except ValueError: # unable to convert hex addr string to value
+        print "unable to convert", addr, "from hex string to number"
+        mapaddr2offsetso[addr] = ret
+        return ret
+    for start, end, so in procmap:
+        if (val >= start) and (val <= end):
+            ret = (hex(val-start), so)
+            break
+    mapaddr2offsetso[addr] = ret
+    return ret
+
+# given a symbol, return the tuple
+# (found, funcfileline)
+# where found is True if the symbol was found
+
+def fileaddr2funcfileline(f, addr):
+    global addr2linepipes
+    pipe = addr2linepipes.get(f, None)
+    if not pipe:
+        cmd = ['addr2line', '-s', '-f', '-e', f]
+        pipe = Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        addr2linepipes[f] = pipe
+    pipe.stdin.write(addr + '\n')
+    pipe.stdin.flush()
+    funcname = pipe.stdout.readline().strip()
+    fileline = pipe.stdout.readline().strip()
+    if not funcname or not fileline: # process has crashed
+        pipe.terminate()
+        print f, addr, "pipe exited with", pipe.wait()
+        del addr2linepipes[f]
+        return ("??", "??:0")
+    return (funcname, fileline)
+
+def addr2line(addr):
+    global addr2funcfileline
+
+    if addr in addr2funcfileline:
+        return addr2funcfileline[addr]
+
+    funcname, fileline = (None, None)
+    found = False
+    for f in exeliblist:
+        funcname, fileline = fileaddr2funcfileline(f, addr)
+        if funcname.startswith("??") and fileline.startswith("??"):
+            continue
+        found = True
+        break
+    if found:
+        funcfileline = str(funcname) + ":" + str(fileline)
+    else:
+        if args.p > 0:
+            offset, so = addr2offsetso(args.p, addr)
+            if not offset or not so:
+                print "addr", addr, "not found"
+                funcfileline = addr
+            else:
+                debugso = "/usr/lib/debug%s.debug" % so
+                funcname, fileline = fileaddr2funcfileline(debugso, offset)
+                if funcname.startswith("??") and fileline.startswith("??"):
+                    funcfileline = addr
+                else:
+                    funcfileline = str(funcname) + ":" + str(fileline)
+        else:
+            funcfileline = addr
+    addr2funcfileline[addr] = funcfileline
+    return funcfileline
+
+def cnvtstack(line):
+    global unique_hex_stacks
+    if line.startswith('0x'): # assume a hex address
+        if line in unique_hex_stacks:
+            return unique_hex_stacks[line]
+        ret = ""
+        for addr in line.split():
+            ret = ret + addr2line(addr) + "\n"
+        unique_hex_stacks[line] = ret
+        return ret
+    else:
+        return line
 
 # this uniquely identifies a location where a mutex is created/initialized
 # it contains statistics and a list of contentions
@@ -98,7 +224,7 @@ class Mutex:
         self.count = 0
         self.total = 0
         self.max = 0
-    def addstack(self, line): self.stack = self.stack + line
+    def addstack(self, line): self.stack = self.stack + cnvtstack(line)
     def addcont(self, cont):
         self.count += 1
         self.total += cont.elapsed
@@ -122,7 +248,7 @@ class Contention:
         self.count = 1
         self.total = elapsed
         self.max = elapsed
-    def addstack(self, line): self.stack = self.stack + line
+    def addstack(self, line): self.stack = self.stack + cnvtstack(line)
 
 def finalize_obj(curobj):
     # finalize curobj
@@ -137,11 +263,12 @@ def finalize_obj(curobj):
         mutexstack.addobj(curobj)
 
 # pass 1 - read the file and parse all of the mutex init and contentions
-print "Begin - parsing file", sys.argv[1]
-f = file(sys.argv[1])
+print "Begin - parsing file", files[0]
+f = file(files[0])
 curobj = None
 instack = False
 for line in f:
+    if warnre.search(line): continue # ignore warnings
     match = endre.match(line)
     if match:
         finalize_obj(curobj)
@@ -180,12 +307,11 @@ print "Done parsing file - finding all contended stacks"
 # malloc+0x66 [libc-2.12.so]
 # _L_lock_5189+0x10 [libc-2.12.so]
 # _int_free+0x40b [libc-2.12.so]
-dbre = re.compile(r'__db_tas_mutex_lock\+0x11d')
-mallocre = re.compile(r'malloc\+0x66 \[libc')
-freere = re.compile(r'_int_free\+0x40b')
-free2re = re.compile(r'_int_free\+0x412')
-reallocre = re.compile(r'__libc_realloc\+0xd4')
-callocre = re.compile(r'__libc_calloc\+0x8b')
+dbre = re.compile(r'\b__db_tas_mutex_lock\b')
+mallocre = re.compile(r'\bmalloc\b')
+freere = re.compile(r'\b_int_free\b')
+reallocre = re.compile(r'\b__libc_realloc\b')
+callocre = re.compile(r'\b__libc_calloc\b')
 dbidx = -1
 allocfreeidx = -1
 stack_list = []
@@ -198,7 +324,7 @@ for stack, msobj in stack2msobj.iteritems():
         else:
             stack_list[dbidx].mergewith(msobj)
     elif mallocre.search(stack) or freere.search(stack) or reallocre.search(stack) or \
-         callocre.search(stack) or free2re.search(stack):
+         callocre.search(stack):
         if allocfreeidx < 0:
             allocfreeidx = len(stack_list) # index of appended msobj
             stack_list.append(msobj)
@@ -254,6 +380,7 @@ for stack, msobj in stack2msobj.iteritems():
 
 mistacksf.write('All alloc/free init/first seen stacks:\n')
 for stack, msobj in stack2msobj.iteritems():
-    if mallocre.search(stack) or freere.search(stack) or reallocre.search(stack) or callocre.search(stack):
+    if mallocre.search(stack) or freere.search(stack) or reallocre.search(stack) or \
+            callocre.search(stack):
         mistacksf.write('%s\n' % msobj.stack)
 mistacksf.close()
