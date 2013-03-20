@@ -917,36 +917,49 @@ srch1plots() {
     # assume data directories are the subdirs of the current dir
     str1=
     str2=
-    for dir in * ; do
+    for dir in "$@" ; do
+        if [ ! -d $dir -a ! -f $dir ] ; then
+            lbl="$dir" # is a label
+            continue
+        fi
         if [ ! -d $dir ] ; then continue ; fi
         if [ ! -f $dir/srch.dat ] ; then
             sort -n $dir/srch.out.* | cnvtldcltoutput > $dir/srch.dat
         fi
         count=0
         lastcount=0
-        for file in $dir/srch.out.* ; do
+        for file in $dir/srch.out.? $dir/srch.out.?? ; do
+            if [ ! -f "$file" ] ; then continue ; fi
             tmpstr=`cnvtextradata < $file | tee extra.dat | grep ^vendorVersion | cut -f2 -d' '`
             case $tmpstr in Sun*) vendor=sun ;; 389*) vendor=rhds ;; Red*) vendor=rhds ;;
             *) echo Error: unknown vendor $tmpstr in $file - skipping
             esac
             if [ -s extra.dat -a -n "$vendor" ] ; then
-                mv extra.dat extra-$vendor.dat
+                mv extra.dat extra-$vendor-$lbl.dat
             else
                 echo skipping empty extra.dat file from $file
             fi
             count=`expr $count + 1`
         done
         if [ $count -gt $lastcount ] ; then
-            str1="$str1 $dir/srch.dat 2 ${vendor}_$count"
-            str2="$str2 $dir/srch.dat 3 ${vendor}_$count"
+            str1="$str1 $dir/srch.dat 2 ${vendor}_${lbl}_$count"
+            str2="$str2 $dir/srch.dat 3 ${vendor}_${lbl}_$count"
         else
-            str1="$dir/srch.dat 2 ${vendor}_$count $str1"
-            str2="$dir/srch.dat 3 ${vendor}_$count $str2"
+            str1="$dir/srch.dat 2 ${vendor}_${lbl}_$count $str1"
+            str2="$dir/srch.dat 3 ${vendor}_${lbl}_$count $str2"
         fi
         lastcount=$count
     done
-    comptimedata graph.png extra-sun.dat extra-rhds.dat $str1
-    comptimedata graph-avg.png extra-sun.dat extra-rhds.dat $str2
+    extras=`ls -1 extra*.dat|head -2`
+    nextras=`ls -1 extra*.dat|head -2|wc -l`
+    if [ $nextras -lt 1 ] ; then
+        extras="/dev/null /dev/null"
+    elif [ $nextras -lt 2 ] ; then
+        extras="$extras /dev/null"
+    fi
+    echo comptimedata graph.png $extras $str1
+    comptimedata graph.png $extras $str1
+    comptimedata graph-avg.png $extras $str2
 }
 
 for cmd in "$@" ; do
@@ -961,6 +974,7 @@ for cmd in "$@" ; do
     cnvtfreeoutput) shift ; cnvtfreeoutput "$@" ; exit 0 ;;
     cnvtiotopoutput) shift ; cnvtiotopoutput "$@" ; exit 0 ;;
     srchmodplots) shift ; srchmodplots "$@" ; exit 0 ;;
+    srch1plots) shift ; srch1plots "$@" ; exit 0 ;;
     esac
     $cmd || { echo Error: $cmd returned error $! ; exit 1 ; }
 done
