@@ -3,7 +3,7 @@ import os
 import sys
 import time
 import ldap
-from ldap.controls import LDAPControl
+from ldap.controls import LDAPControl, SimplePagedResultsControl
 from ldap.ldapobject import LDAPObject
 import struct
 import pprint
@@ -133,6 +133,45 @@ class DirSyncCtrl(LDAPControl):
                 self.decodeControlValue(ctrl.controlValue)
                 return
 
+def dopagedsearch(suffix, scope, filt, attrlist, serverctrls):
+    msgid = ad.search_ext(suffix, scope, filt, attrlist, 0, serverctrls)
+    done = False
+    while not done:
+        pages += 1
+        print "Getting page %d" % (pages,)
+        rtype, rdata, rmsgid, decoded_serverctrls = l.result3(msgid)
+        print '%d results' % len(rdata)
+    #    pprint.pprint(rdata)
+        pctrls = [
+          c
+          for c in serverctrls
+          if c.controlType == ldap.LDAP_CONTROL_PAGE_OID
+        ]
+        dsreqctrl = None
+        for c in serverctrls:
+            if c.controlType == "1.2.840.113556.1.4.841":
+                dsreqctrl = c
+                break
+        if rtype == ldap.RES_SEARCH_RESULT:
+            dsreqctrl.update(decoded_serverctrls)
+            done = True
+        if pctrls:
+            est, cookie = pctrls[0].controlValue
+            if cookie:
+                lc.controlValue = (page_size, cookie)
+                msgid = l.search_ext(
+                  base,
+                  ldap.SCOPE_SUBTREE,
+                  search_flt,
+                  attrlist=searchreq_attrlist,
+                  serverctrls=[lc]
+                )
+            else:
+                break
+        else:
+            print "Warning:  Server ignores RFC 2696 control."
+            break
+
 def main():
     adhost = 'w2k8x8664.testdomain.com'
     adport = 389
@@ -156,7 +195,11 @@ def main():
     filt = '(objectclass=*)'
     attrlist = None
     dirsyncctrl = DirSyncCtrl()
-    serverctrls = [dirsyncctrl]
+    page_size = 1000
+    lc = SimplePagedResultsControl(
+        ldap.LDAP_CONTROL_PAGE_OID,True,(page_size,'')
+        )
+    serverctrls = [dirsyncctrl, lc]
 
     msgid = ad.search_ext(suffix, scope, filt, attrlist, 0, serverctrls)
     initiallist = {}
