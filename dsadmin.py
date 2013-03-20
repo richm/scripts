@@ -1,12 +1,12 @@
 import sys
 import os
 import os.path
-haspopen = True
+HASPOPEN = True
 try:
     from subprocess import Popen, PIPE, STDOUT
 except ImportError:
     import popen2
-    haspopen = False
+    HASPOPEN = False
 import base64
 import urllib
 import urllib2
@@ -17,8 +17,6 @@ import ldap
 import cStringIO
 import time
 import operator
-import tempfile
-import pprint
 import shutil
 import datetime
 import select
@@ -34,13 +32,16 @@ REPLICAID = 1 # the initial replica ID
  HUB_TYPE,
  LEAF_TYPE) = range(3)
 
+DBMONATTRRE = re.compile(r'^([a-zA-Z]+)-([1-9][0-9]*)$')
+DBMONATTRRESUN = re.compile(r'^([a-zA-Z]+)-([a-zA-Z]+)$')
+
 class Error(Exception): pass
 class InvalidArgumentError(Error):
-    def __init__(self,message): self.message = message
-    def __repr__(self): return message
+    def __init__(self, message): self.message = message
+    def __repr__(self): return self.message
 class NoSuchEntryError(Error):
-    def __init__(self,message): self.message = message
-    def __repr__(self): return message
+    def __init__(self, message): self.message = message
+    def __repr__(self): return self.message
 
 class Entry:
     """This class represents an LDAP Entry object.  An LDAP entry consists of a DN
@@ -50,7 +51,7 @@ class Entry:
     dn - string - the string DN of the entry
     data - cidict - case insensitive dict of the attributes and values"""
 
-    def __init__(self,entrydata):
+    def __init__(self, entrydata):
         """data is the raw data returned from the python-ldap result method, which is
         a search result entry or a reference or None.
         If creating a new empty entry, data is the string DN."""
@@ -74,11 +75,11 @@ class Entry:
         true otherwise"""
         return self.data != None and len(self.data) > 0
 
-    def hasAttr(self,name):
+    def hasAttr(self, name):
         """Return True if this entry has an attribute named name, False otherwise"""
         return self.data and self.data.has_key(name)
 
-    def __getattr__(self,name):
+    def __getattr__(self, name):
         """If name is the name of an LDAP attribute, return the first value for that
         attribute - equivalent to getValue - this allows the use of
         entry.cn
@@ -89,15 +90,15 @@ class Entry:
         if name == 'dn' or name == 'data': return self.__dict__.get(name, None)
         return self.getValue(name)
 
-    def getValues(self,name):
+    def getValues(self, name):
         """Get the list (array) of values for the attribute named name"""
         return self.data.get(name,[])
 
-    def getValue(self,name):
+    def getValue(self, name):
         """Get the first value for the attribute named name"""
         return self.data.get(name,[None])[0]
 
-    def hasValue(self,name,val=None):
+    def hasValue(self, name, val=None):
         """True if the given attribute is present and has the given value"""
         if not self.hasAttr(name): return False
         if not val: return True
@@ -107,12 +108,12 @@ class Entry:
             return list(val) == self.data.get(name)
         return val in self.data.get(name)
 
-    def hasValueCase(self,name,val):
+    def hasValueCase(self, name, val):
         """True if the given attribute is present and has the given value - case insensitive value match"""
         if not self.hasAttr(name): return False
         return val.lower() in [x.lower() for x in self.data.get(name)]
 
-    def setValue(self,name,*value):
+    def setValue(self, name, *value):
         """Value passed in may be a single value, several values, or a single sequence.
         For example:
            ent.setValue('name', 'value')
@@ -126,6 +127,16 @@ class Entry:
         else:
             self.data[name] = value
 
+    def getAttrs(self):
+        if not self.data: return []
+        return self.data.keys()
+
+    def iterAttrs(self, attrsOnly=False):
+        if attrsOnly:
+            return self.data.iterkeys()
+        else:
+            return self.data.iteritems()
+
     setValues = setValue
 
     def toTupleList(self):
@@ -134,7 +145,7 @@ class Entry:
         single value or a list of values."""
         return self.data.items()
 
-    def ref(self): return self.ref
+    def getref(self): return self.ref
 
     def __str__(self):
         """Convert the Entry to its LDIF representation"""
@@ -201,7 +212,6 @@ csn.subseq is not currently used"""
 
     def diff2str(self, oth):
         retstr = ''
-        (tsdiff, seqdiff, riddiff, subseqdiff) = self.csndiff(oth)
         diff = oth.ts - self.ts
         if diff > 0:
             td = datetime.timedelta(seconds=diff)
@@ -448,7 +458,6 @@ class DSAdmin(SimpleLDAPObject):
             except ldap.OPERATIONS_ERROR, e:
                 print "caught exception ", e
                 print "Probably Active Directory, pass"
-                pass # usually means this is Active Directory
             except ldap.LDAPError, e:
                 print "caught exception ", e
                 raise
@@ -504,7 +513,7 @@ class DSAdmin(SimpleLDAPObject):
     def getEntry(self,*args):
         """This wraps the search function.  It is common to just get one entry"""
         res = self.search(*args)
-        type, obj = self.result(res)
+        restype, obj = self.result(res)
         if not obj:
             raise NoSuchEntryError("no such entry for " + str(args) + "\n")
         elif isinstance(obj,Entry):
@@ -529,7 +538,6 @@ class DSAdmin(SimpleLDAPObject):
             errLog = self.errlog
         done = False
         started = True
-        code = 0
         lastLine = ""
         cmd = cmd.lower()
         fullCmd = instanceDir + "/" + cmd + "-slapd"
@@ -664,13 +672,13 @@ class DSAdmin(SimpleLDAPObject):
         (done, exitCode) = self.checkTask(entry,True,verbose)
         return exitCode
 
-    def importLDIF(self,file,suffix,be=None,verbose=False):
-        cn = "import" + str(int(time.time()));
+    def importLDIF(self,ldiffile,suffix,be=None,verbose=False):
+        cn = "import" + str(int(time.time()))
         dn = "cn=%s,cn=import,cn=tasks,cn=config" % cn
         entry = Entry(dn)
         entry.setValues('objectclass', 'top', 'extensibleObject')
         entry.setValues('cn', cn)
-        entry.setValues('nsFilename', file)
+        entry.setValues('nsFilename', ldiffile)
         if be:
             entry.setValues('nsInstance', be)
         else:
@@ -680,19 +688,19 @@ class DSAdmin(SimpleLDAPObject):
 
         if rc:
             if verbose:
-                print "Error: import task %s for file %s exited with %d" % (cn,file,rc)
+                print "Error: import task %s for file %s exited with %d" % (cn,ldiffile,rc)
         else:
             if verbose:
-                print "Import task %s for file %s completed successfully" % (cn,file)
+                print "Import task %s for file %s completed successfully" % (cn,ldiffile)
         return rc
 
-    def exportLDIF(self, file, suffix, be=None, forrepl=False, verbose=False):
+    def exportLDIF(self, ldiffile, suffix, be=None, forrepl=False, verbose=False):
         cn = "export" + str(int(time.time()))
         dn = "cn=%s,cn=export,cn=tasks,cn=config" % cn
         entry = Entry(dn)
         entry.setValues('objectclass', 'top', 'extensibleObject')
         entry.setValues('cn', cn)
-        entry.setValues('nsFilename', file)
+        entry.setValues('nsFilename', ldiffile)
         if be:
             entry.setValues('nsInstance', be)
         else:
@@ -704,10 +712,10 @@ class DSAdmin(SimpleLDAPObject):
 
         if rc:
             if verbose:
-                print "Error: export task %s for file %s exited with %d" % (cn,file,rc)
+                print "Error: export task %s for file %s exited with %d" % (cn,ldiffile,rc)
         else:
             if verbose:
-                print "Export task %s for file %s completed successfully" % (cn,file)
+                print "Export task %s for file %s completed successfully" % (cn,ldiffile)
         return rc
 
     def createIndex(self, suffix, attr, verbose=False):
@@ -724,10 +732,10 @@ class DSAdmin(SimpleLDAPObject):
 
         if rc:
             if verbose:
-                print "Error: index task %s for file %s exited with %d" % (cn,file,rc)
+                print "Error: index task %s for file %s exited with %d" % (cn,ldiffile,rc)
         else:
             if verbose:
-                print "Index task %s for file %s completed successfully" % (cn,file)
+                print "Index task %s for file %s completed successfully" % (cn,ldiffile)
         return rc
 
     def fixupMemberOf(self, suffix, filt=None, verbose=False):
@@ -749,7 +757,7 @@ class DSAdmin(SimpleLDAPObject):
                 print "fixupMemberOf task %s for basedn %s completed successfully" % (cn,suffix)
         return rc
 
-    def addLDIF(self, file, cont=False):
+    def addLDIF(self, input_file, cont=False):
         class LDIFAdder(ldif.LDIFParser):
             def __init__(self, input_file, conn, cont=False,
                 ignored_attr_types=None,max_entries=0,process_url_schemes=None
@@ -773,7 +781,26 @@ class DSAdmin(SimpleLDAPObject):
                     if not self.cont: raise e
                     print "Error: could not add entry %s: error %s" % (dn, str(e))
 
-        adder = LDIFAdder(file, self, cont)        
+        adder = LDIFAdder(input_file, self, cont)
+
+    def getSuffixes(self):
+        ents = self.search_s("cn=mapping tree,cn=config", ldap.SCOPE_ONELEVEL)
+        sufs = []
+        for ent in ents:
+            unquoted = None
+            quoted = None
+            for val in ent.getValues('cn'):
+                if val.find('"') < 0: # prefer the one that is not quoted
+                    unquoted = val
+                else:
+                    quoted = val
+            if unquoted: # preferred
+                sufs.append(unquoted)
+            elif quoted: # strip
+                sufs.append(quoted.strip('"'))
+            else:
+                raise Exception("Error: mapping tree entry " + ent.dn + " has no suffix")
+        return sufs
 
     def setupBackend(self,suffix,binddn=None,bindpw=None,urls=None,attrvals={}):
         ldbmdn = "cn=ldbm database,cn=plugins,cn=config"
@@ -834,7 +861,7 @@ class DSAdmin(SimpleLDAPObject):
         rc = 0
         verbose = False
         nsuffix = DSAdmin.normalizeDN(suffix)
-        escapedn = DSAdmin.escapeDNValue(nsuffix)
+        #escapedn = DSAdmin.escapeDNValue(nsuffix)
         nparent = ""
         if parent:
             nparent = DSAdmin.normalizeDN(parent)
@@ -945,10 +972,18 @@ class DSAdmin(SimpleLDAPObject):
         return 0
 
     def getDBStats(self, suffix, bename=''):
-        beents = self.getBackendsForSuffix(suffix)
-        dn = "cn=monitor," + beents[0].dn
+        if bename:
+            dn = "cn=monitor,cn=%s,cn=ldbm database,cn=plugins,cn=config" % bename
+        else:
+            beents = self.getBackendsForSuffix(suffix)
+            dn = "cn=monitor," + beents[0].dn
+        dbmondn = "cn=monitor,cn=ldbm database,cn=plugins,cn=config"
+        dbdbdn = "cn=database,cn=monitor,cn=ldbm database,cn=plugins,cn=config"
         try:
+            # entrycache and dncache stats
             ent = self.getEntry(dn, ldap.SCOPE_BASE)
+            monent = self.getEntry(dbmondn, ldap.SCOPE_BASE)
+            dbdbent = self.getEntry(dbdbdn, ldap.SCOPE_BASE)
             ret =  "cache   available ratio    count unitsize\n"
             mecs = ent.maxentrycachesize or "0"
             cecs = ent.currententrycachesize or "0"
@@ -961,26 +996,114 @@ class DSAdmin(SimpleLDAPObject):
                 size = int(cecs)/count
             else:
                 size = 0
-            ret += "ent   % 11d   % 3d % 8d % 5d" % (rem, ratio, count, size)
-            if not ent.maxdncachesize:
-                # 8.2 - no dn cache
-                return ret
-            mdcs = ent.maxdncachesize or "0"
-            cdcs = ent.currentdncachesize or "0"
-            rem = int(mdcs)-int(cdcs)
-            dct = ent.dncachetries or "0"
-            tries = int(dct)
-            if tries:
-                ratio = (100*int(ent.dncachehits))/tries
-            else:
-                ratio = 0
-            count = ent.currentdncachecount or "0"
-            count = int(count)
-            if count:
-                size = int(cdcs)/count
-            else:
-                size = 0
-            ret += "\ndn    % 11d   % 3d % 8d % 5d" % (rem, ratio, count, size)
+            ret += "entry % 11d   % 3d % 8d % 5d" % (rem, ratio, count, size)
+            if ent.maxdncachesize:
+                mdcs = ent.maxdncachesize or "0"
+                cdcs = ent.currentdncachesize or "0"
+                rem = int(mdcs)-int(cdcs)
+                dct = ent.dncachetries or "0"
+                tries = int(dct)
+                if tries:
+                    ratio = (100*int(ent.dncachehits))/tries
+                else:
+                    ratio = 0
+                count = ent.currentdncachecount or "0"
+                count = int(count)
+                if count:
+                    size = int(cdcs)/count
+                else:
+                    size = 0
+                ret += "\ndn    % 11d   % 3d % 8d % 5d" % (rem, ratio, count, size)
+
+            if ent.hasAttr('entrycache-hashtables'):
+                ret += "\n\n" + ent.getValue('entrycache-hashtables')
+
+            # global db stats
+            ret += "\n\nglobal db stats"
+            dbattrs = 'dbcachehits dbcachetries dbcachehitratio dbcachepagein dbcachepageout dbcacheroevict dbcacherwevict'.split(' ')
+            cols = {'dbcachehits': [len('cachehits'), 'cachehits'], 'dbcachetries': [10, 'cachetries'],
+                      'dbcachehitratio': [5, 'ratio'], 'dbcachepagein': [6, 'pagein'],
+                      'dbcachepageout': [7, 'pageout'], 'dbcacheroevict': [7, 'roevict'],
+                    'dbcacherwevict': [7, 'rwevict']}
+            dbrec = {}
+            for attr,vals in monent.iterAttrs():
+                if attr.startswith('dbcache'):
+                    val = vals[0]
+                    dbrec[attr] = val
+                    vallen = len(val)
+                    if vallen > cols[attr][0]:
+                        cols[attr][0] = vallen
+            # construct the format string based on the field widths
+            fmtstr = ''
+            ret += "\n"
+            for attr in dbattrs:
+                fmtstr += ' %%(%s)%ds' % (attr, cols[attr][0])
+                ret += ' %*s' % tuple(cols[attr])
+            ret += "\n" + (fmtstr % dbrec)
+
+            # other db stats
+            skips = {'nsslapd-db-cache-hit': 'nsslapd-db-cache-hit', 'nsslapd-db-cache-try': 'nsslapd-db-cache-try',
+                     'nsslapd-db-page-write-rate': 'nsslapd-db-page-write-rate',
+                     'nsslapd-db-page-read-rate': 'nsslapd-db-page-read-rate',
+                     'nsslapd-db-page-ro-evict-rate': 'nsslapd-db-page-ro-evict-rate',
+                     'nsslapd-db-page-rw-evict-rate': 'nsslapd-db-page-rw-evict-rate'}
+
+            hline = '' # header line
+            vline = '' # val line
+            for attr,vals in dbdbent.iterAttrs():
+                if attr in skips: continue
+                if attr.startswith('nsslapd-db-'):
+                    short = attr.replace('nsslapd-db-', '')
+                    val = vals[0]
+                    width = max(len(short), len(val))
+                    if len(hline) + width > 70:
+                        ret += "\n" + hline + "\n" + vline
+                        hline = vline = ''
+                    hline += ' %*s' % (width, short)
+                    vline += ' %*s' % (width, val)
+
+            # per file db stats
+            ret += "\n\nper file stats"
+            # key is number
+            # data is dict - key is attr name without the number - val is the attr val
+            dbrec = {}
+            dbattrs = ['dbfilename', 'dbfilecachehit', 'dbfilecachemiss', 'dbfilepagein', 'dbfilepageout']
+            # cols maps dbattr name to column header and width
+            cols = {'dbfilename': [len('dbfilename'), 'dbfilename'], 'dbfilecachehit': [9, 'cachehits'],
+                      'dbfilecachemiss': [11, 'cachemisses'], 'dbfilepagein': [6, 'pagein'],
+                      'dbfilepageout': [7, 'pageout']}
+            for attr,vals in ent.iterAttrs():
+                match = DBMONATTRRE.match(attr)
+                if match:
+                    name = match.group(1)
+                    num = match.group(2)
+                    val = vals[0]
+                    if name == 'dbfilename':
+                        val = val.split('/')[-1]
+                    dbrec.setdefault(num, {})[name] = val
+                    vallen = len(val)
+                    if vallen > cols[name][0]:
+                        cols[name][0] = vallen
+                match = DBMONATTRRESUN.match(attr)
+                if match:
+                    name = match.group(1)
+                    if name == 'entrycache': continue
+                    num = match.group(2)
+                    val = vals[0]
+                    if name == 'dbfilename':
+                        val = val.split('/')[-1]
+                    dbrec.setdefault(num, {})[name] = val
+                    vallen = len(val)
+                    if vallen > cols[name][0]:
+                        cols[name][0] = vallen
+            # construct the format string based on the field widths
+            fmtstr = ''
+            ret += "\n"
+            for attr in dbattrs:
+                fmtstr += ' %%(%s)%ds' % (attr, cols[attr][0])
+                ret += ' %*s' % tuple(cols[attr])
+            for dbf in dbrec.itervalues():
+                ret += "\n" + (fmtstr % dbf)
             return ret
         except Exception, e:
             print "caught exception", str(e)
@@ -988,10 +1111,10 @@ class DSAdmin(SimpleLDAPObject):
 
     def waitForEntry(self, dn, timeout=7200, attr='', quiet=True):
         scope = ldap.SCOPE_BASE
-        filter = "(objectclass=*)"
+        filt = "(objectclass=*)"
         attrlist = []
         if attr:
-            filter = "(%s=*)" % attr
+            filt = "(%s=*)" % attr
             attrlist.append(attr)
         timeout += int(time.time())
 
@@ -1005,7 +1128,7 @@ class DSAdmin(SimpleLDAPObject):
         entry = None
         while not entry and int(time.time()) < timeout:
             try:
-                entry = self.getEntry(dn, scope, filter, attrlist)
+                entry = self.getEntry(dn, scope, filt, attrlist)
             except NoSuchEntryError: pass # found entry, but no attr
             except ldap.NO_SUCH_OBJECT: pass # no entry yet
             except ldap.LDAPError, e: # badness
@@ -1104,8 +1227,9 @@ class DSAdmin(SimpleLDAPObject):
         self.addSuffix(suffix) # step 2 - create the suffix
         # step 3 - add the proxy ACI to the suffix
         try:
-            self.modify_s(suffix, [(ldap.MOD_ADD, 'aci',
-                                    [ "(targetattr = \"*\")(version 3.0; acl \"Proxied authorization for database links\"; allow (proxy) userdn = \"ldap:///%s\";)" % binddn ])])
+            acival = "(targetattr = \"*\")(version 3.0; acl \"Proxied authorization for database links\"" + \
+                "; allow (proxy) userdn = \"ldap:///%s\";)" % binddn
+            self.modify_s(suffix, [(ldap.MOD_ADD, 'aci', [ acival ])])
         except ldap.TYPE_OR_VALUE_EXISTS:
             print "proxy aci already exists in suffix %s for %s" % (suffix, binddn)
 
@@ -1117,7 +1241,7 @@ class DSAdmin(SimpleLDAPObject):
         bindpw = "chaining"
 
         to.setupChainingFarm(suffix, binddn, bindpw)
-        self.setupChainingMux(suffix, isIntermediate, binddn, bindpw, to.toLDAPURL());
+        self.setupChainingMux(suffix, isIntermediate, binddn, bindpw, to.toLDAPURL())
 
     def setupChangelog(self, dirpath=''):
         dn = "cn=changelog5,cn=config"
@@ -1190,10 +1314,10 @@ class DSAdmin(SimpleLDAPObject):
     def setupReplica(self, args):
         global REPLICAID # declared here because we may assign to it
         suffix = args['suffix']
-        type = args.get('type', MASTER_TYPE)
+        repltype = args.get('type', MASTER_TYPE)
         legacy = args.get('legacy', False)
         binddn = args['binddn']
-        id = args.get('id', None)
+        replid = args.get('id', None)
         nsuffix = DSAdmin.normalizeDN(suffix)
         mtent = self.getMTEntry(suffix)
         if not mtent:
@@ -1205,10 +1329,9 @@ class DSAdmin(SimpleLDAPObject):
         except ldap.NO_SUCH_OBJECT: entry = None
         if entry:
             print "Already setup replica for suffix", suffix
-            if not nsuffix in self.suffixes:
-                self.suffixes[nsuffix] = {}
-            self.suffixes[nsuffix]['dn'] = dn
-            self.suffixes[nsuffix]['type'] = type
+            rec = self.suffixes.setdefault(nsuffix, {})
+            rec['dn'] = dn
+            rec['type'] = repltype
             return 0
 
         binddnlist = []
@@ -1220,15 +1343,15 @@ class DSAdmin(SimpleLDAPObject):
         else:
             binddnlist.append(REPLBINDDN)
 
-        if not id and type == MASTER_TYPE:
-            id = REPLICAID
+        if not replid and repltype == MASTER_TYPE:
+            replid = REPLICAID
             REPLICAID += 1
-        elif not id:
-            id = 0
+        elif not replid:
+            replid = 0
         else:
-            REPLICAID = id # use given id for internal counter
+            REPLICAID = replid # use given id for internal counter
             
-        if type == MASTER_TYPE:
+        if repltype == MASTER_TYPE:
             replicatype = "3"
         else:
             replicatype = "2"
@@ -1242,9 +1365,9 @@ class DSAdmin(SimpleLDAPObject):
         entry.setValues('objectclass', "top", "nsds5replica", "extensibleobject")
         entry.setValues('cn', "replica")
         entry.setValues('nsds5replicaroot', nsuffix)
-        entry.setValues('nsds5replicaid', str(id))
+        entry.setValues('nsds5replicaid', str(replid))
         entry.setValues('nsds5replicatype', replicatype)
-        if type != LEAF_TYPE:
+        if repltype != LEAF_TYPE:
             entry.setValues('nsds5flags', "1")
         entry.setValues('nsds5replicabinddn', binddnlist)
         entry.setValues('nsds5replicalegacyconsumer', legacyval)
@@ -1261,7 +1384,7 @@ class DSAdmin(SimpleLDAPObject):
             return -1
         elif self.verbose:
             print entry
-        self.suffixes[nsuffix] = {'dn': dn, 'type': type}
+        self.suffixes[nsuffix] = {'dn': dn, 'type': repltype}
         return 0
 
     # dn can be an entry
@@ -1292,7 +1415,7 @@ class DSAdmin(SimpleLDAPObject):
     def setupReplBindDN(self, dn, pwd):
         return self.setupBindDN(dn, pwd)
 
-    def setupWinSyncAgmt(self, repoth, args, entry):
+    def setupWinSyncAgmt(self, args, entry):
         if not args.has_key('winsync'):
             return
 
@@ -1332,15 +1455,19 @@ class DSAdmin(SimpleLDAPObject):
         othhost, othport, othsslport = (repoth.host, repoth.port, repoth.sslport)
         othport = othsslport or othport
         cn = "meTo%s%d" % (othhost,othport)
+        if not nsuffix in self.suffixes: # adding agreement to previously created replica
+            replents = self.getReplicaEnts(suffix)
+            if not replents:
+                raise Exception("Error: no replica set up for suffix " + suffix)
+            replent = replents[0]
+            self.suffixes[nsuffix] = {'dn': replent.dn, 'type': int(replent.nsds5replicatype)}
         dn = "cn=%s,%s" % (cn,self.suffixes[nsuffix]['dn'])
         try:
             entry = self.getEntry(dn, ldap.SCOPE_BASE)
         except ldap.NO_SUCH_OBJECT: entry = None
         if entry:
             print "Agreement exists:", dn
-            if not nsuffix in self.suffixes:
-                self.suffixes[nsuffix] = {}
-            self.suffixes[nsuffix][str(repoth)] = dn
+            self.suffixes.setdefault(nsuffix, {})[str(repoth)] = dn
             return dn
         if (nsuffix in self.agmt) and (repoth in self.agmt[nsuffix]):
             print "Agreement exists:", dn
@@ -1358,7 +1485,7 @@ class DSAdmin(SimpleLDAPObject):
         entry.setValues('nsds5replicabindmethod', args.get('bindmethod', 'simple'))
         entry.setValues('nsds5replicaroot', nsuffix)
         entry.setValues('nsds5replicaupdateschedule', '0000-2359 0123456')
-        entry.setValues('description', "me to %s%d" % (othhost,othport));
+        entry.setValues('description', "me to %s%d" % (othhost,othport))
         if args.has_key('starttls'):
             entry.setValues('nsds5replicatransportinfo', 'TLS')
             entry.setValues('nsds5replicaport', str(othport))
@@ -1377,14 +1504,14 @@ class DSAdmin(SimpleLDAPObject):
         if args.has_key('stripattrs'):
             entry.setValues('nsds5ReplicaStripAttrs', args['stripattrs'])
 
-        self.setupWinSyncAgmt(repoth, args, entry)
+        self.setupWinSyncAgmt(args, entry)
         try:
             self.add_s(entry)
         except:
             raise
         entry = self.waitForEntry(dn)
         if entry:
-            self.suffixes[nsuffix][str(repoth)] = dn
+            self.suffixes.setdefault(nsuffix, {})[str(repoth)] = dn
             chain = args.has_key('chain')
             if chain and self.suffixes[nsuffix]['type'] == MASTER_TYPE:
                 self.setupChainingFarm(suffix, binddn, bindpw)
@@ -1411,6 +1538,14 @@ class DSAdmin(SimpleLDAPObject):
             attrs.append('cn')
         ents = self.search_s("cn=mapping tree,cn=config", ldap.SCOPE_SUBTREE, realfilt, attrs)
         return [ent.dn for ent in ents]
+
+    def getReplicaEnts(self,suffix=None):
+        if suffix:
+            filt = "(&(objectclass=nsds5Replica)(nsds5replicaroot=%s))" % suffix
+        else:
+            filt = "(objectclass=nsds5Replica)"
+        ents = self.search_s("cn=mapping tree,cn=config", ldap.SCOPE_SUBTREE, filt)
+        return ents
 
     def getReplStatus(self,agmtdn):
         attrlist = ['cn', 'nsds5BeginReplicaRefresh', 'nsds5replicaUpdateInProgress',
@@ -1450,10 +1585,14 @@ class DSAdmin(SimpleLDAPObject):
             print "Error reading status from agreement", agmtdn
         elif ent.nsds5replicaChangesSentSinceStartup:
             val = ent.nsds5replicaChangesSentSinceStartup
-            for item in val.split(' '):
-                ary = item.split(":")
-                if ary and len(ary) > 1:
-                    retval = retval + int(ary[1].split("/")[0])
+            items = val.split(' ')
+            if len(items) == 1:
+                retval = int(items[0])
+            else:
+                for item in items:
+                    ary = item.split(":")
+                    if ary and len(ary) > 1:
+                        retval = retval + int(ary[1].split("/")[0])
         return retval
         
     def startReplication_async(self, agmtdn):
@@ -1475,8 +1614,6 @@ class DSAdmin(SimpleLDAPObject):
             refresh = entry.nsds5BeginReplicaRefresh
             inprogress = entry.nsds5replicaUpdateInProgress
             status = entry.nsds5ReplicaLastInitStatus
-            start = entry.nsds5ReplicaLastInitStart
-            end = entry.nsds5ReplicaLastInitEnd
             if not refresh: # done - check status
                 if not status:
                     print "No status yet"
@@ -1607,9 +1744,12 @@ class DSAdmin(SimpleLDAPObject):
 
     def setupSSL(self,secport=0,sourcedir=None,secargs={}):
         dn = 'cn=encryption,cn=config'
+        ciphers = '-rsa_null_md5,+rsa_rc4_128_md5,+rsa_rc4_40_md5,+rsa_rc2_40_md5,+rsa_des_sha,' + \
+            '+rsa_fips_des_sha,+rsa_3des_sha,+rsa_fips_3des_sha,' + \
+            '+tls_rsa_export1024_with_rc4_56_sha,+tls_rsa_export1024_with_des_cbc_sha'
         mod = [(ldap.MOD_REPLACE, 'nsSSL3', secargs.get('nsSSL3', 'on')),
                (ldap.MOD_REPLACE, 'nsSSLClientAuth', secargs.get('nsSSLClientAuth', 'allowed')),
-               (ldap.MOD_REPLACE, 'nsSSL3Ciphers', secargs.get('nsSSL3Ciphers', '-rsa_null_md5,+rsa_rc4_128_md5,+rsa_rc4_40_md5,+rsa_rc2_40_md5,+rsa_des_sha,+rsa_fips_des_sha,+rsa_3des_sha,+rsa_fips_3des_sha,+fortezza,+fortezza_rc4_128_sha,+fortezza_null,+tls_rsa_export1024_with_rc4_56_sha,+tls_rsa_export1024_with_des_cbc_sha'))]
+               (ldap.MOD_REPLACE, 'nsSSL3Ciphers', secargs.get('nsSSL3Ciphers', ciphers))]
         self.modify_s(dn, mod)
 
         dn = 'cn=RSA,cn=encryption,cn=config'
@@ -1643,7 +1783,7 @@ class DSAdmin(SimpleLDAPObject):
                 mode = os.stat(destf)[0]
                 newmode = mode|0600
                 os.chmod(destf, newmode)
-            except: pass # oh well
+            except Exception, e: pass # oh well
             # copy2 will copy the mode too
             shutil.copy2(srcf, destf)
 
@@ -1658,7 +1798,7 @@ class DSAdmin(SimpleLDAPObject):
     def getRUV(self, suffix, tryrepl=False, verbose=False):
         uuid = "ffffffff-ffffffff-ffffffff-ffffffff"
         filt = "(&(nsUniqueID=%s)(objectclass=nsTombstone))" % uuid
-        attrs = ['nsds50ruv', 'nsruvReplicaLastModified'];
+        attrs = ['nsds50ruv', 'nsruvReplicaLastModified']
         ents = self.search_s(suffix, ldap.SCOPE_SUBTREE, filt, attrs)
         ent = None
         if ents and (len(ents) > 0): ent = ents[0]
@@ -1707,7 +1847,7 @@ class DSAdmin(SimpleLDAPObject):
         nsuffix = DSAdmin.normalizeDN(suffix)
         escapesuffix = DSAdmin.escapeDNFiltValue(nsuffix)
         spacesuffix = DSAdmin.normalizeDN(nsuffix, True)
-        filt = '(|(cn=%s)(cn=%s)(cn=%s)(cn="%s")(cn="%s"))' % (escapesuffix, nsuffix, spacesuffix, nsuffix, spacesuffix)
+        filt = '(|(cn=%s)(cn=%s)(cn=%s)(cn="%s")(cn="%s")(cn=%s)(cn="%s"))' % (escapesuffix, nsuffix, spacesuffix, nsuffix, spacesuffix, suffix, suffix)
         return filt
     suffixfilt = staticmethod(suffixfilt)
 
@@ -1720,7 +1860,7 @@ class DSAdmin(SimpleLDAPObject):
         ipadr = None
         try:
             ipadr = socket.gethostbyname(hname)
-        except:
+        except Exception, e:
             pass
         if not ipadr:
             print "Error: no IP Address for", hname
@@ -1730,7 +1870,7 @@ class DSAdmin(SimpleLDAPObject):
         # local addresses
         thematch = re.compile('inet addr:' + ipadr)
         found = False
-        if haspopen:
+        if HASPOPEN:
             p = Popen(['/sbin/ifconfig', '-a'], stdout=PIPE)
             child_stdout = p.stdout
         else:
@@ -1739,7 +1879,7 @@ class DSAdmin(SimpleLDAPObject):
             if re.search(thematch, line):
                 found = True
                 break
-        if haspopen:
+        if HASPOPEN:
             p.wait()
         return found
     isLocalHost = staticmethod(isLocalHost)
@@ -1902,11 +2042,11 @@ class DSAdmin(SimpleLDAPObject):
             dn = cfgdn
             if args.has_key('admin_domain'):
                 dn = "cn=%s,ou=%s, %s" % (args['newhost'], args['admin_domain'], cfgdn)
-            filter = "(&(objectclass=nsAdminServer)(serverHostName=%s)" % args['newhost']
+            filt = "(&(objectclass=nsAdminServer)(serverHostName=%s)" % args['newhost']
             if args.has_key('sroot'):
-                filter += "(serverRoot=%s)" % args['sroot']
-            filter += ")"
-            ent = cfgconn.getEntry(dn, ldap.SCOPE_SUBTREE, filter, ['serverRoot'])
+                filt += "(serverRoot=%s)" % args['sroot']
+            filt += ")"
+            ent = cfgconn.getEntry(dn, ldap.SCOPE_SUBTREE, filt, ['serverRoot'])
             if ent:
                 if not args.has_key('sroot') and ent.serverRoot:
                     args['sroot'] = ent.serverRoot
@@ -1952,7 +2092,7 @@ class DSAdmin(SimpleLDAPObject):
         env['NETSITE_ROOT'] = sroot
         env['CONTENT_LENGTH'] = str(length)
         progdir = os.path.dirname(prog)
-        if haspopen:
+        if HASPOPEN:
             pipe = Popen(prog, cwd=progdir, env=env, stdin=PIPE, stdout=PIPE, stderr=STDOUT)
             child_stdin = pipe.stdin
             child_stdout = pipe.stdout
@@ -1970,7 +2110,7 @@ class DSAdmin(SimpleLDAPObject):
                 exitCode = ary[1].strip()
                 break
         child_stdout.close()
-        if haspopen:
+        if HASPOPEN:
             osCode = pipe.wait()
             print "%s returned NMC code %s and OS code %s" % (prog, exitCode, osCode)
         return exitCode
@@ -2037,7 +2177,7 @@ SchemaFile= %s
         else:
             cmd.extend(['-l', '/dev/null'])
         cmd.extend(['-s', '-f', '-'])
-        if haspopen:
+        if HASPOPEN:
             pipe = Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=STDOUT)
             child_stdin = pipe.stdin
             child_stdout = pipe.stdout
@@ -2275,7 +2415,7 @@ def testit():
 
     basedn = "cn=config"
     scope = ldap.SCOPE_BASE
-    filter = "(objectclass=*)"
+    filt = "(objectclass=*)"
 
     try:
         m1 = DSAdmin(host,port,binddn,bindpw)
@@ -2283,7 +2423,7 @@ def testit():
 #        m1.importLDIF(filename, "dc=example,dc=com", None, True)
 #        m1.exportLDIF('/tmp/ldif', "dc=example,dc=com", False, True)
         print m1.sroot, m1.inst, m1.errlog
-        ent = m1.getEntry(basedn, scope, filter, None)
+        ent = m1.getEntry(basedn, scope, filt, None)
         if ent:
             print ent.passwordmaxage
         m1 = DSAdmin.createInstance({
