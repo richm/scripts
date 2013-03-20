@@ -16,37 +16,65 @@ pidfile=$RUN_DIR/slapd-$inst.pid
 startpidfile=$RUN_DIR/slapd-$inst.startpid
 rm -f $pidfile $startpidfile
 SLAPD=${PREFIX:-/usr}/sbin/ns-slapd
+case `file $SLAPD` in
+*"shell script"*) SLAPD=$SLAPD.orig ;;
+*text*) SLAPD=$SLAPD.orig ;;
+esac
+if [ ! -f $SLAPD ] ; then
+    echo Error: command $SLAPD not found
+    exit 1
+fi
 SLAPD_COMMAND="$SLAPD -D $CONFIG_DIR -i $pidfile -w $startpidfile -d 0"
 
+if [ -z "$PREFIX" ] ; then
+    ARCH=`uname -p`
+    case $ARCH in *64) AD=64 ;; esac
+fi
+DSLIBDIR=${PREFIX:-/usr}/lib$AD/dirsrv
+PLUGINDIR=$DSLIBDIR/plugins
+
 modules="-d $SLAPD"
-for m in /usr/lib64/dirsrv/plugins/libpwdstorage-plugin.so \
-    /usr/lib64/dirsrv/plugins/libdes-plugin.so \
+for m in $DSLIBDIR=/libslapd.so.0.0.0 \
+    $PLUGINDIR/libpwdstorage-plugin.so \
+    $PLUGINDIR/libdes-plugin.so \
     /usr/lib64/sasl2/libgssapiv2.so.2.0.23 \
-    /usr/lib64/dirsrv/plugins/libback-ldbm.so \
-    /usr/lib64/dirsrv/plugins/libschemareload-plugin.so \
+    $PLUGINDIR/libback-ldbm.so \
+    $PLUGINDIR/libschemareload-plugin.so \
     /usr/lib64/libnssdbm3.so \
     /usr/lib64/libsoftokn3.so \
     /lib64/libdb-4.7.so \
-    /usr/lib64/dirsrv/plugins/libsyntax-plugin.so \
-    /usr/lib64/dirsrv/plugins/libautomember-plugin.so \
-    /usr/lib64/dirsrv/plugins/libchainingdb-plugin.so \
-    /usr/lib64/dirsrv/plugins/liblinkedattrs-plugin.so \
-    /usr/lib64/dirsrv/plugins/libmanagedentries-plugin.so \
-    /usr/lib64/dirsrv/plugins/libstatechange-plugin.so \
-    /usr/lib64/dirsrv/libns-dshttpd.so.0.0.0 \
-    /usr/lib64/dirsrv/plugins/libacl-plugin.so \
-    /usr/lib64/dirsrv/plugins/libcos-plugin.so \
-    /usr/lib64/dirsrv/plugins/libreplication-plugin.so \
-    /usr/lib64/dirsrv/plugins/libroles-plugin.so \
-    /usr/lib64/dirsrv/plugins/libhttp-client-plugin.so \
-    /usr/lib64/dirsrv/plugins/libviews-plugin.so ;
+    $PLUGINDIR/libsyntax-plugin.so \
+    $PLUGINDIR/libautomember-plugin.so \
+    $PLUGINDIR/libchainingdb-plugin.so \
+    $PLUGINDIR/liblinkedattrs-plugin.so \
+    $PLUGINDIR/libmanagedentries-plugin.so \
+    $PLUGINDIR/libstatechange-plugin.so \
+    $DSLIBDIR/libns-dshttpd.so.0.0.0 \
+    $PLUGINDIR/libacl-plugin.so \
+    $PLUGINDIR/libcos-plugin.so \
+    $PLUGINDIR/libreplication-plugin.so \
+    $PLUGINDIR/libroles-plugin.so \
+    $PLUGINDIR/libhttp-client-plugin.so \
+    $PLUGINDIR/libviews-plugin.so ;
 do
     modules="$modules -d $m"
 done
 
-STAP_ARRAY_SIZE=${STAP_ARRAY_SIZE:-65536}
-STAP_STRING_LEN=${STAP_STRING_LEN:-4096}
+STAP_ARRAY_SIZE=${STAP_ARRAY_SIZE:-8192}
+STAP_STRING_LEN=${STAP_STRING_LEN:-8192}
+STAP_KRETACTIVE=${STAP_KRETACTIVE:-`expr 1024 \* 1024`}
 
-STAP_OPTS="-DMAXACTION=$STAP_ARRAY_SIZE -DMAXSTRINGLEN=$STAP_STRING_LEN -DKRETACTIVE=1000 -DSTP_NO_OVERLOAD -t --ldd -v"
+STAP_OPTS="-s 1 -DMAXTRYLOCK=2000 -DMAXACTION=$STAP_ARRAY_SIZE -DMAXSTRINGLEN=$STAP_STRING_LEN -DKRETACTIVE=$STAP_KRETACTIVE -DSTP_NO_OVERLOAD -t --ldd -v"
 
-sudo stap $STAP_OPTS -c "$SLAPD_COMMAND" $modules stap-dirsrv.stp $STAP_ARRAY_SIZE
+KEEP_STATS=${KEEP_STATS:-0}
+if [ $KEEP_STATS -eq 0 ] ; then
+    KEEP_STATS=stap-dirsrv-nostats.stp
+else
+    KEEP_STATS=stap-dirsrv.stp
+fi
+
+if [ -n "$SLAPD_PID" ] ; then
+    sudo stap $STAP_OPTS -x $SLAPD_PID $modules $KEEP_STATS $STAP_ARRAY_SIZE
+else
+    sudo stap $STAP_OPTS -c "$SLAPD_COMMAND" $modules $KEEP_STATS $STAP_ARRAY_SIZE
+fi
