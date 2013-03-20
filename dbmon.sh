@@ -46,7 +46,7 @@ dodbmon() {
         /^dbcachepageout/ { dbcachepageout=$2 }
         /^nsslapd-db-page-ro-evict-rate/ { dbroevict=$2 }
         /^nsslapd-db-pages-in-use/ { dbpages=$2 }
-        /^dn: cn=monitor, *cn=[a-zA-Z0-9][a-zA-Z0-9]*, *cn=ldbm database, *cn=plugins, *cn=config/ {
+        /^dn: cn=monitor, *cn=[a-zA-Z0-9][a-zA-Z0-9_]*, *cn=ldbm database, *cn=plugins, *cn=config/ {
             idxnum=-1
             idxname=""
             dbname=tolower($5)
