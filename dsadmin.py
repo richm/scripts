@@ -821,26 +821,34 @@ class DSAdmin(SimpleLDAPObject):
                 raise Exception("Error: mapping tree entry " + ent.dn + " has no suffix")
         return sufs
 
-    def setupBackend(self,suffix,binddn=None,bindpw=None,urls=None,attrvals={}):
+    def setupBackend(self,suffix,binddn=None,bindpw=None,urls=None,attrvals={},benamebase=None):
         ldbmdn = "cn=ldbm database,cn=plugins,cn=config"
         chaindn = "cn=chaining database,cn=plugins,cn=config"
         dnbase = ""
-        benamebase = ""
+        # if benamebase is set, try creating without appending
+        benum = 0 if benamebase else 1 
         verbose = False
+
         # figure out what type of be based on args
         if binddn and bindpw and urls:  # its a chaining be
-            benamebase = "chaindb"
+            benamebase = benamebase or "chaindb"
             dnbase = chaindn
         else:  # its a ldbm be
-            benamebase = "localdb"
+            benamebase = benamebase or "localdb"
             dnbase = ldbmdn
 
+        print "benamebase: " + benamebase
         nsuffix = DSAdmin.normalizeDN(suffix)
-        benum = 1
         done = False
         while not done:
             try:
-                cn = benamebase + str(benum)  # e.g. localdb1
+                # if benamebase is set, benum starts at 0
+                # and the first attempt tries to create the 
+                # simple benamebase. On failure benum is 
+                # incremented and the suffix is appended
+                # to the cn
+                cn = benamebase + ( str(benum) if benum else "" ) # e.g. localdb1
+                print "create backend with cn: %s" % cn
                 dn = "cn=" + cn + "," + dnbase
                 entry = Entry(dn)
                 entry.setValues('objectclass', 'top', 'extensibleObject', 'nsBackendInstance')
@@ -854,6 +862,8 @@ class DSAdmin(SimpleLDAPObject):
                     pass
                     #     $entry->add('nsslapd-cachesize' => '-1');
                     #     $entry->add('nsslapd-cachememsize' => '2097152');
+                
+                # set attrvals (but not cn, because it's in dn)
                 if attrvals:
                     for attr, val in attrvals.items():
                         if verbose:
@@ -877,6 +887,7 @@ class DSAdmin(SimpleLDAPObject):
         return cn
 
     def setupSuffix(self, suffix, bename, parent=""):
+
         rc = 0
         verbose = False
         nsuffix = DSAdmin.normalizeDN(suffix)
@@ -971,7 +982,7 @@ class DSAdmin(SimpleLDAPObject):
 
         return ""
 
-    def addSuffix(self, suffix, binddn=None, bindpw=None, urls=None):
+    def addSuffix(self, suffix, binddn=None, bindpw=None, urls=None, bename=None):
         """Create a suffix and its backend.
 
             Uses: setupBackend and SetupSuffix
@@ -982,11 +993,10 @@ class DSAdmin(SimpleLDAPObject):
         """
 
         beents = self.getBackendsForSuffix(suffix, ['cn'])
-        bename = ""
         benames = []
         # no backends for this suffix yet - create one
         if not beents:
-            bename = self.setupBackend(suffix, binddn, bindpw, urls)
+            bename = self.setupBackend(suffix, binddn, bindpw, urls, benamebase=bename)
             if not bename:
                 print "Couldn't create backend for", suffix
                 return -1  # ldap error code handled already
