@@ -1,6 +1,6 @@
 from nose import *
 from nose.tools import *
-from dsadmin import DSAdmin
+from dsadmin import DSAdmin, Entry
 
 
 class config(object):
@@ -21,7 +21,7 @@ def addbackend_test():
     ret = conn.addSuffix(suffix="o=addressbook1", bename="addressbook1")
 
     e = Entry(('o=addressbook1', {
-               'objectclass', ['top', 'organization'],
-               'o', 'addressbook1'
+               'objectclass': ['top', 'organization'],
+               'o': 'addressbook1'
                }))
     conn.add(e)
