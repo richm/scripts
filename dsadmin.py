@@ -1,6 +1,10 @@
 """The dsadmin module.
 
 
+    IMPORTANT: Ternary operator syntax is unsupported on RHEL5
+        x if cond else y #don't!
+        
+
 """
 
 import sys
@@ -33,9 +37,17 @@ REPLBINDDN = ''
 REPLBINDPW = ''
 REPLICAID = 1  # the initial replica ID
 
+# replicatype @see https://access.redhat.com/knowledge/docs/en-US/Red_Hat_Directory_Server/8.1/html/Administration_Guide/Managing_Replication-Configuring-Replication-cmd.html
+# 2 for consumers and hubs (read-only replicas)
+# 3 for both single and multi-master suppliers (read-write replicas)
+# TODO: let's find a way to be consistent - eg. using bitwise operator
 (MASTER_TYPE,
  HUB_TYPE,
  LEAF_TYPE) = range(3)
+
+REPLICA_RDONLY_TYPE = 2  # CONSUMER and HUB
+REPLICA_WRONLY_TYPE = 1  # SINGLE and MULTI MASTER
+REPLICA_RDWR_TYPE = REPLICA_RDONLY_TYPE | REPLICA_WRONLY_TYPE
 
 DBMONATTRRE = re.compile(r'^([a-zA-Z]+)-([1-9][0-9]*)$')
 DBMONATTRRESUN = re.compile(r'^([a-zA-Z]+)-([a-zA-Z]+)$')
@@ -278,18 +290,19 @@ class CSN:
 
 class RUV:
     """RUV is Replica Update Vector
-ruv.gen is the generation CSN
-ruv.rid[1] through ruv.rid[N] are dicts - the number (1-N) is the replica ID
-  ruv.rid[N][url] is the purl
-  ruv.rid[N][min] is the min csn
-  ruv.rid[N][max] is the max csn
-  ruv.rid[N][lastmod] is the last modified timestamp
-example ruv attr:
-nsds50ruv: {replicageneration} 3b0ebc7f000000010000
-nsds50ruv: {replica 1 ldap://myhost:51010} 3b0ebc9f000000010000 3b0ebef7000000010000
-nsruvReplicaLastModified: {replica 1 ldap://myhost:51010} 292398402093
-if the tryrepl flag is true, if getting the ruv from the suffix fails, try getting
-the ruv from the cn=replica entry"""
+        ruv.gen is the generation CSN
+        ruv.rid[1] through ruv.rid[N] are dicts - the number (1-N) is the replica ID
+          ruv.rid[N][url] is the purl
+          ruv.rid[N][min] is the min csn
+          ruv.rid[N][max] is the max csn
+          ruv.rid[N][lastmod] is the last modified timestamp
+        example ruv attr:
+        nsds50ruv: {replicageneration} 3b0ebc7f000000010000
+        nsds50ruv: {replica 1 ldap://myhost:51010} 3b0ebc9f000000010000 3b0ebef7000000010000
+        nsruvReplicaLastModified: {replica 1 ldap://myhost:51010} 292398402093
+        if the tryrepl flag is true, if getting the ruv from the suffix fails, try getting
+        the ruv from the cn=replica entry
+    """
     genpat = r'\{replicageneration\}\s+(\w+)'
     genre = re.compile(genpat)
     ruvpat = r'\{replica\s+(\d+)\s+(.+?)\}\s*(\w*)\s*(\w*)'
@@ -531,8 +544,15 @@ class DSAdmin(SimpleLDAPObject):
                 raise
 
     def __localinit__(self):
+        if self.sslport:
+            proto = 'ldaps'
+            self.port = self.sslport
+        else:
+            proto = 'ldap'
+
         SimpleLDAPObject.__init__(
-            self, 'ldap://%s:%d' % (self.host, self.port))
+            self, '%s://%s:%d' % (proto, self.host, self.port))
+
         # see if binddn is a dn or a uid that we need to lookup
         if self.binddn and not DSAdmin.is_a_dn(self.binddn):
             self.simple_bind_s("", "")  # anon
@@ -556,7 +576,7 @@ class DSAdmin(SimpleLDAPObject):
                     needtls = True
             self.__initPart2()
 
-    def __init__(self, host, port, binddn='', bindpw='', nobind=False):  # default to anon bind
+    def __init__(self, host, port, binddn='', bindpw='', nobind=False, sslport=0):  # default to anon bind
         """We just set our instance variables and wrap the methods - the real work is
         done in __localinit__ and __initPart2 - these are separated out this way so
         that we can call them from places other than instance creation e.g. when
@@ -564,7 +584,7 @@ class DSAdmin(SimpleLDAPObject):
         self.__wrapmethods()
         self.verbose = False
         self.port = port or 389
-        self.sslport = 0
+        self.sslport = sslport
         self.host = host
         self.binddn = binddn
         self.bindpw = bindpw
@@ -584,6 +604,7 @@ class DSAdmin(SimpleLDAPObject):
         """This wraps the search function.  It is common to just get one entry"""
         res = self.search(*args)
         restype, obj = self.result(res)
+        # TODO: why not test restype?
         if not obj:
             raise NoSuchEntryError("no such entry for " + str(args) + "\n")
         elif isinstance(obj, Entry):
@@ -896,7 +917,10 @@ class DSAdmin(SimpleLDAPObject):
         chaindn = "cn=chaining database,cn=plugins,cn=config"
         dnbase = ""
         # if benamebase is set, try creating without appending
-        benum = 0 if benamebase else 1
+        if benamebase:
+            benum = 0
+        else:
+            benum = 1
         verbose = False
 
         # figure out what type of be based on args
@@ -917,8 +941,10 @@ class DSAdmin(SimpleLDAPObject):
                 # simple benamebase. On failure benum is
                 # incremented and the suffix is appended
                 # to the cn
-                cn = benamebase + (str(benum)
-                                   if benum else "")  # e.g. localdb1
+                if benum:
+                                cn = benamebase + str(benum)  # e.g. localdb1
+                else:
+                                cn = benamebase
                 print "create backend with cn: %s" % cn
                 dn = "cn=" + cn + "," + dnbase
                 entry = Entry(dn)
@@ -1019,13 +1045,18 @@ class DSAdmin(SimpleLDAPObject):
 
     def getMTEntry(self, suffix, attrs=[]):
         """Given a suffix, return the mapping tree entry for it.  If attrs is
-        given, only fetch those attributes, otherwise, get all attributes."""
+        given, only fetch those attributes, otherwise, get all attributes.
+
+        TODO: returned None if not found. Now raises
+        """
         filt = DSAdmin.suffixfilt(suffix)
         entry = None
         try:
             entry = self.getEntry(
                 "cn=mapping tree,cn=config", ldap.SCOPE_ONELEVEL, filt, attrs)
         except NoSuchEntryError:
+            # TODO why not raise here?
+            print ("Cannot find suffix in mapping tree: %r " % suffix)
             pass
         except ldap.FILTER_ERROR, e:
             print "Error searching for", filt
@@ -1385,13 +1416,15 @@ class DSAdmin(SimpleLDAPObject):
         self.setupChainingMux(
             suffix, isIntermediate, binddn, bindpw, to.toLDAPURL())
 
-    def setupChangelog(self, dirpath=''):
+    def setupChangelog(self, dirpath='', dbname='changelogdb'):
         """Setup the replication changelog.
+            Return 0 on success
 
             TODO: why dirpath="" and not None?
+            TODO: why not return changelog entry and raise on fault
         """
         dn = "cn=changelog5,cn=config"
-        dirpath = dirpath or self.dbdir + "/changelogdb"
+        dirpath = os.path.join(dirpath or self.dbdir, dbname)
         entry = Entry(dn)
         entry.setValues('objectclass', "top", "extensibleobject")
         entry.setValues('cn', "changelog5")
@@ -1452,6 +1485,11 @@ class DSAdmin(SimpleLDAPObject):
                 type - master, hub, leaf (see above for values) - if type is omitted, default is master
                 legacy - true or false - for legacy consumer
                 id - replica id or - if not given - an internal sequence number will be assigned
+
+                # further args
+                tpd -
+                pd -
+                referrals -
              }
 
              Ex. conn.setupReplica({
@@ -1463,20 +1501,32 @@ class DSAdmin(SimpleLDAPObject):
             'binddn': [ "cn=repl1,cn=config", "cn=repl2,cn=config" ]
 
             TODO: use the more descriptive naming stuff? suffix, rtype=MASTER_TYPE, legacy=False, id=None
-
+            TODO: this method does not update replica type
             DONE: replaced id and type keywords with rid and rtype
         """
         global REPLICAID  # declared here because we may assign to it
         suffix = args['suffix']
         repltype = args.get('type', MASTER_TYPE)
-        legacy = args.get('legacy', False)
         binddn = args['binddn']
         replid = args.get('id', None)
+
+        # set default values
+        if repltype == MASTER_TYPE:
+            replicatype = REPLICA_RDWR_TYPE
+        else:
+            replicatype = REPLICA_RDONLY_TYPE
+        if args.get('legacy', False):
+            legacy = 'on'
+        else:
+            legacy = 'off'
+
+        # create replica entry in mapping-tree
         nsuffix = DSAdmin.normalizeDN(suffix)
         mtent = self.getMTEntry(suffix)
         if not mtent:
-            print "Error: no such suffix:", suffix
-            return -1
+            raise NoSuchEntryError(
+                "Error: no such suffix in Mapping Tree: %s" % suffix)
+
         dn = "cn=replica," + mtent.dn
         try:
             entry = self.getEntry(dn, ldap.SCOPE_BASE)
@@ -1489,6 +1539,7 @@ class DSAdmin(SimpleLDAPObject):
             rec['type'] = repltype
             return 0
 
+        # If a replica does not exist
         binddnlist = []
         if binddn:
             if isinstance(binddn, basestring):
@@ -1506,27 +1557,19 @@ class DSAdmin(SimpleLDAPObject):
         else:
             REPLICAID = replid  # use given id for internal counter
 
-        if repltype == MASTER_TYPE:
-            replicatype = "3"
-        else:
-            replicatype = "2"
-
-        if legacy:
-            legacyval = "on"
-        else:
-            legacyval = "off"
-
         entry = Entry(dn)
         entry.setValues(
             'objectclass', "top", "nsds5replica", "extensibleobject")
         entry.setValues('cn', "replica")
         entry.setValues('nsds5replicaroot', nsuffix)
         entry.setValues('nsds5replicaid', str(replid))
-        entry.setValues('nsds5replicatype', replicatype)
+        entry.setValues('nsds5replicatype', str(replicatype))
         if repltype != LEAF_TYPE:
             entry.setValues('nsds5flags', "1")
         entry.setValues('nsds5replicabinddn', binddnlist)
-        entry.setValues('nsds5replicalegacyconsumer', legacyval)
+        entry.setValues('nsds5replicalegacyconsumer', legacy)
+
+        # other args
         if 'tpi' in args:
             entry.setValues(
                 'nsds5replicatombstonepurgeinterval', str(args['tpi']))
@@ -1534,7 +1577,10 @@ class DSAdmin(SimpleLDAPObject):
             entry.setValues('nsds5ReplicaPurgeDelay', str(args['pd']))
         if 'referrals' in args:
             entry.setValues('nsds5ReplicaReferral', args['referrals'])
+
         self.add_s(entry)
+
+        # check if the entry exists TODO better to raise!
         entry = self.getEntry(dn, ldap.SCOPE_BASE)
         if not entry:
             print "Entry %s was added successfully, but I cannot search it" % dn
@@ -1544,38 +1590,47 @@ class DSAdmin(SimpleLDAPObject):
         self.suffixes[nsuffix] = {'dn': dn, 'type': repltype}
         return 0
 
-    def setupBindDN(self, dn, pwd):
+    def setupBindDN(self, binddn=REPLBINDDN, bindpw=REPLBINDPW):
         """ Create a person entry with the given dn and pwd.
+            Return 0 on success
 
-            dn can be an entry
+            binddn can be an entry
 
             TODO: Could we return the newly created entry and raise
                 exception on fault?
+
+            DONE: supported uid attribute too
         """
-        if dn and isinstance(dn, Entry):
-            dn = dn.dn
-        elif not dn:
-            dn = REPLBINDDN
+        if binddn and isinstance(binddn, Entry):
+            assert binddn.dn, "Error: entry dn should be set!" % binddn
+            binddn = binddn.dn
 
-        pwd = pwd or REPLBINDPW
-
-        ent = Entry(dn)
+        ent = Entry(binddn)
         ent.setValues('objectclass', "top", "person")
-        ent.setValues('userpassword', pwd)
+        ent.setValues('userpassword', bindpw)
         ent.setValues('sn', "bind dn pseudo user")
+        ent.setValues('cn', "bind dn pseudo user")
+
+        # support for uid
+        attribute, value = binddn.split(",")[0].split("=", 1)
+        if attribute == 'uid':
+            ent.setValues('objectclass', "top", "person", 'inetOrgPerson')
+            ent.setValues('uid', value)
+
         try:
             self.add_s(ent)
         except ldap.ALREADY_EXISTS:
-            print "Entry %s already exists" % dn
-        ent = self.getEntry(dn, ldap.SCOPE_BASE)
+            print "Entry %s already exists" % binddn
+        ent = self.getEntry(binddn, ldap.SCOPE_BASE)
         if not ent:
-            print "Entry %s was added successfully, but I cannot search it" % dn
+            print "Entry %s was added successfully, but I cannot search it" % binddn
             return -1
         elif self.verbose:
             print ent
         return 0
 
     def setupReplBindDN(self, dn, pwd):
+        """TODO why not remove this redundant method?"""
         return self.setupBindDN(dn, pwd)
 
     def setupWinSyncAgmt(self, args, entry):
@@ -1614,21 +1669,39 @@ class DSAdmin(SimpleLDAPObject):
     def setupAgreement(self, repoth, args):
         """Create a replication agreement from self to repoth - that is, self is the
         supplier and repoth is the DSAdmin object for the consumer (the consumer
-        can be a master) """
+        can be a master)
+
+        repoth:
+            * a DSAdmin object if chaining
+            * an object with attributes: host, port, sslport
+
+        args =  {
+        'suffix': "dc=example,dc=com",
+        'bename': "userRoot",
+        'binddn': "cn=replrepl,cn=config",
+        'bindcn': "replrepl", # so I need it?
+        'bindpw': "replrepl",
+        'log'   : True
+        }
+
+
+        """
         suffix = args['suffix']
         nsuffix = DSAdmin.normalizeDN(suffix)
         othhost, othport, othsslport = (
             repoth.host, repoth.port, repoth.sslport)
         othport = othsslport or othport
-        cn = "meTo%s%d" % (othhost, othport)
+        cn = "meTo%s:%d" % (othhost, othport)
         if not nsuffix in self.suffixes:  # adding agreement to previously created replica
             replents = self.getReplicaEnts(suffix)
             if not replents:
                 raise Exception(
                     "Error: no replica set up for suffix " + suffix)
             replent = replents[0]
-            self.suffixes[nsuffix] = {'dn': replent.dn, 'type':
-                                      int(replent.nsds5replicatype)}
+            self.suffixes[nsuffix] = {
+                'dn': replent.dn,
+                'type': int(replent.nsds5replicatype)
+            }
         dn = "cn=%s,%s" % (cn, self.suffixes[nsuffix]['dn'])
         try:
             entry = self.getEntry(dn, ldap.SCOPE_BASE)
@@ -1839,7 +1912,11 @@ class DSAdmin(SimpleLDAPObject):
         return rc
 
     def replicaSetupAll(self, repArgs):
-        """setup everything needed to enable replication for a given suffix
+        """setup everything needed to enable replication for a given suffix.
+            1- eventually create the suffix
+            2- enable replication logging
+            3- create changelog
+            4- create replica user
             repArgs is a dict with the following fields:
                 {
                 suffix - suffix to set up for replication (eventually create)
@@ -1864,6 +1941,7 @@ class DSAdmin(SimpleLDAPObject):
         """
 
         repArgs.setdefault('type', MASTER_TYPE)
+        user = repArgs.get('binddn'), repArgs.get('bindpw')
 
         # eventually create the suffix (Eg. o=userRoot)
         # TODO should I check the addSuffix output as it doesn't raise
@@ -1875,14 +1953,22 @@ class DSAdmin(SimpleLDAPObject):
         if repArgs.get('log', False):
             self.enableReplLogging()
 
-        # enable changelog for master replicas
+        # enable changelog for master and hub
         if repArgs['type'] != LEAF_TYPE:
             self.setupChangelog()
-        self.setupReplBindDN(repArgs.get('binddn'), repArgs.get('bindpw'))
+        # create replica user
+        try:
+            self.setupReplBindDN(*user)
+        except ldap.ALREADY_EXISTS:
+            # no problem ;)
+            pass
+
+        # setup replica
         self.setupReplica(repArgs)
         if 'legacy' in repArgs:
-            self.setupLegacyConsumer(
-                repArgs.get('binddn'), repArgs.get('bindpw'))
+            self.setupLegacyConsumer(*user)
+
+        return 0
 
     def subtreePwdPolicy(self, basedn, pwdpolicy, verbose=False, **pwdargs):
         args = {'basedn': basedn, 'escdn': DSAdmin.escapeDNValue(
@@ -1952,7 +2038,13 @@ class DSAdmin(SimpleLDAPObject):
                 mods.append((ldap.MOD_REPLACE, attr, str(val)))
         self.modify_s(dn, mods)
 
-    def setupSSL(self, secport=0, sourcedir=None, secargs={}):
+    def setupSSL(self, secport=0, sourcedir=None, secargs={}, copy_nss_files=True):
+        """
+
+            secargs = {
+                'nsSSLPersonalitySSL':
+            }
+        """
         dn = 'cn=encryption,cn=config'
         ciphers = '-rsa_null_md5,+rsa_rc4_128_md5,+rsa_rc4_40_md5,+rsa_rc2_40_md5,+rsa_des_sha,' + \
             '+rsa_fips_des_sha,+rsa_3des_sha,+rsa_fips_3des_sha,' + \
@@ -1991,8 +2083,8 @@ class DSAdmin(SimpleLDAPObject):
         certdir = ent.getValue('nsslapd-certdir')
         # have to stop the server before replacing any security files
         self.stop()
-        # copy security files from source dir to our cert dir
-        if True:
+        # eventually copy security files from source dir to our cert dir
+        if copy_nss_files:
             for ff in ['cert8.db', 'key3.db', 'secmod.db', 'pin.txt', 'certmap.conf']:
                 srcf = sourcedir + '/' + ff
                 destf = certdir + '/' + ff
