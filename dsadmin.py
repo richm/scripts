@@ -62,12 +62,15 @@ class NoSuchEntryError(Error):
 
 
 class Entry:
-    """This class represents an LDAP Entry object.  An LDAP entry consists of a DN
-    and a list of attributes.  Each attribute consists of a name and a list of
-    values.  In python-ldap, entries are returned as a list of 2-tuples.
-    Instance variables:
-        dn - string - the string DN of the entry
-    data - cidict - case insensitive dict of the attributes and values"""
+    """This class represents an LDAP Entry object.
+
+        An LDAP entry consists of a DN and a list of attributes.
+        Each attribute consists of a name and a list of values.
+        In python-ldap, entries are returned as a list of 2-tuples.
+        Instance variables:
+          dn - string - the string DN of the entry
+          data - cidict - case insensitive dict of the attributes and values
+    """
 
     def __init__(self, entrydata):
         """entrydata is the raw data returned from the python-ldap
@@ -76,7 +79,8 @@ class Entry:
             * or a reference            -> (None, reference)
             * or None.
 
-        If creating a new empty entry, data is the string DN."""
+        If creating a new empty entry, data is the string DN.
+        """
         self.ref = None
         if entrydata:
             if isinstance(entrydata, tuple):
@@ -89,6 +93,7 @@ class Entry:
                 self.dn = entrydata
                 self.data = ldap.cidict.cidict()
         else:
+            #
             self.dn = ''
             self.data = ldap.cidict.cidict()
 
@@ -956,7 +961,16 @@ class DSAdmin(SimpleLDAPObject):
         return cn
 
     def setupSuffix(self, suffix, bename, parent=""):
+        """Setup a suffix with the given backend-name.
 
+            This method does not create the matching entry in the tree.
+            Ex. setupSuffix(suffix='o=addressbook1', bename='addressbook1')
+                creates:
+                    - the addressbook1 backend-name and file
+                    - the mapping in "cn=mapping tree,cn=config"
+                you have to create:
+                    - the ldap entry "o=addressbook1"
+        """
         rc = 0
         verbose = False
         nsuffix = DSAdmin.normalizeDN(suffix)
@@ -1271,10 +1285,11 @@ class DSAdmin(SimpleLDAPObject):
 
         return entry
 
-    # specify the suffix (should contain 1 local database backend),
-    # the name of the attribute to index, and the types of indexes
-    # to create e.g. "pres", "eq", "sub"
     def addIndex(self, suffix, attr, indexTypes, *matchingRules):
+        """Specify the suffix (should contain 1 local database backend),
+            the name of the attribute to index, and the types of indexes
+            to create e.g. "pres", "eq", "sub"
+        """
         beents = self.getBackendsForSuffix(suffix, ['cn'])
         # assume 1 local backend
         dn = "cn=%s,cn=index,%s" % (attr, beents[0].dn)
@@ -1376,7 +1391,7 @@ class DSAdmin(SimpleLDAPObject):
             TODO: why dirpath="" and not None?
         """
         dn = "cn=changelog5,cn=config"
-        dirpath = dirpath or self.dbdir + "/cldb"
+        dirpath = dirpath or self.dbdir + "/changelogdb"
         entry = Entry(dn)
         entry.setValues('objectclass', "top", "extensibleobject")
         entry.setValues('cn', "changelog5")
@@ -1828,7 +1843,7 @@ class DSAdmin(SimpleLDAPObject):
             repArgs is a dict with the following fields:
                 {
                 suffix - suffix to set up for replication (eventually create)
-                optional fields and their default values
+                            optional fields and their default values
                 bename - name of backend corresponding to suffix, otherwise
                     it will use the *first* backend found (isn't that dangerous?)
                 parent - parent suffix if suffix is a sub-suffix - default is undef
