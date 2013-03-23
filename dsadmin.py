@@ -3,7 +3,7 @@
 
     IMPORTANT: Ternary operator syntax is unsupported on RHEL5
         x if cond else y #don't!
-        
+
 
 """
 
@@ -195,6 +195,10 @@ class Entry:
     def __str__(self):
         """Convert the Entry to its LDIF representation"""
         return self.__repr__()
+
+    def update(self, dct):
+        """Update passthru to the data attribute."""
+        self.data.update(dct)
 
     # the ldif class base64 encodes some attrs which I would rather see in raw form - to
     # encode specific attrs as base64, add them to the list below
@@ -2038,14 +2042,20 @@ class DSAdmin(SimpleLDAPObject):
                 mods.append((ldap.MOD_REPLACE, attr, str(val)))
         self.modify_s(dn, mods)
 
-    def setupSSL(self, secport=0, sourcedir=None, secargs={}, copy_nss_files=True):
-        """
+    def setupSSL(self, secport=0, sourcedir=None, secargs=None):
+        """Configure SSL support with a given certificate and restart the server.
 
-            secargs = {
-                'nsSSLPersonalitySSL':
+            secargs is a dict like {
+                'nsSSLPersonalitySSL': 'Server-Cert'
             }
+
+            If sourcedir is defined, copies nss-cert files in nsslapd-certdir
+
+            TODO: why not secport=636 ?
         """
-        dn = 'cn=encryption,cn=config'
+        secargs = secargs or {}
+
+        dn_enc = 'cn=encryption,cn=config'
         ciphers = '-rsa_null_md5,+rsa_rc4_128_md5,+rsa_rc4_40_md5,+rsa_rc2_40_md5,+rsa_des_sha,' + \
             '+rsa_fips_des_sha,+rsa_3des_sha,+rsa_fips_3des_sha,' + \
             '+tls_rsa_export1024_with_rc4_56_sha,+tls_rsa_export1024_with_des_cbc_sha'
@@ -2053,55 +2063,58 @@ class DSAdmin(SimpleLDAPObject):
                (ldap.MOD_REPLACE, 'nsSSLClientAuth',
                 secargs.get('nsSSLClientAuth', 'allowed')),
                (ldap.MOD_REPLACE, 'nsSSL3Ciphers', secargs.get('nsSSL3Ciphers', ciphers))]
-        self.modify_s(dn, mod)
+        self.modify_s(dn_enc, mod)
 
-        dn = 'cn=RSA,cn=encryption,cn=config'
-        ent = Entry(dn)
-        ent.setValues('objectclass', ['top', 'nsEncryptionModule'])
-        ent.setValues('nsSSLPersonalitySSL', secargs.get(
+        dn_rsa = 'cn=RSA,cn=encryption,cn=config'
+        e_rsa = Entry(dn_rsa)
+        e_rsa.setValues('objectclass', ['top', 'nsEncryptionModule'])
+        e_rsa.setValues('nsSSLPersonalitySSL', secargs.get(
             'nsSSLPersonalitySSL', 'Server-Cert'))
-        ent.setValues(
+        e_rsa.setValues(
             'nsSSLToken', secargs.get('nsSSLToken', 'internal (software)'))
-        ent.setValues('nsSSLActivation', secargs.get('nsSSLActivation', 'on'))
+        e_rsa.setValues(
+            'nsSSLActivation', secargs.get('nsSSLActivation', 'on'))
         try:
-            self.add_s(ent)
+            self.add_s(e_rsa)
         except ldap.ALREADY_EXISTS:
             pass
 
-        dn = 'cn=config'
-        mod = [(
-            ldap.MOD_REPLACE, 'nsslapd-security', secargs.get('nsslapd-security', 'on')),
-            (ldap.MOD_REPLACE, 'nsslapd-ssl-check-hostname',
-             secargs.get('nsslapd-ssl-check-hostname', 'off')),
-            (ldap.MOD_REPLACE, 'nsslapd-secureport', str(secport))]
-        self.modify_s(dn, mod)
+        dn_config = 'cn=config'
+        mod = [
+            (ldap.MOD_REPLACE,
+                'nsslapd-security', secargs.get('nsslapd-security', 'on')),
+            (ldap.MOD_REPLACE,
+                'nsslapd-ssl-check-hostname', secargs.get('nsslapd-ssl-check-hostname', 'off')),
+            (ldap.MOD_REPLACE,
+                'nsslapd-secureport', str(secport))
+        ]
+        self.modify_s(dn_config, mod)
 
-        if not sourcedir:
-            sourcedir = os.environ['SECDIR']
         # get our cert dir
-        ent = self.getEntry(dn, ldap.SCOPE_BASE, '(objectclass=*)')
-        certdir = ent.getValue('nsslapd-certdir')
+        e_config = self.getEntry(dn_config, ldap.SCOPE_BASE, '(objectclass=*)')
+        certdir = e_config.getValue('nsslapd-certdir')
         # have to stop the server before replacing any security files
         self.stop()
+        # allow secport for selinux
+        if secport != 636:
+            cmd = 'semanage port -a -t ldap_port_t -p tcp ' + str(secport)
+            os.system(cmd)
+
         # eventually copy security files from source dir to our cert dir
-        if copy_nss_files:
+        if sourcedir:
             for ff in ['cert8.db', 'key3.db', 'secmod.db', 'pin.txt', 'certmap.conf']:
                 srcf = sourcedir + '/' + ff
                 destf = certdir + '/' + ff
                 # make sure dest is writable so we can copy over it
                 try:
-                    mode = os.stat(destf)[0]
+                    mode = os.stat(destf).st_mode
                     newmode = mode | 0600
                     os.chmod(destf, newmode)
                 except Exception, e:
+                    print e
                     pass  # oh well
                 # copy2 will copy the mode too
                 shutil.copy2(srcf, destf)
-
-        # allow secport for selinux
-        if secport != 636:
-            cmd = 'semanage port -a -t ldap_port_t -p tcp ' + str(secport)
-            os.system(cmd)
 
         # now, restart the ds
         self.start(True)
@@ -2504,6 +2517,7 @@ SchemaFile= %s
         else:
             cmd.extend(['-l', '/dev/null'])
         cmd.extend(['-s', '-f', '-'])
+        print "running: %s " % cmd
         if HASPOPEN:
             pipe = Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=STDOUT)
             child_stdin = pipe.stdin

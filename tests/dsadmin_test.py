@@ -16,7 +16,7 @@ conn = None
 
 
 def dfilter(my_dict, keys):
-    return dict( [(k,v) for k, v in my_dict.iteritems() if k in keys ])
+    return dict([(k, v) for k, v in my_dict.iteritems() if k in keys])
 
 
 def setup():
@@ -63,12 +63,12 @@ def addreplica_write_test():
 
 def setupSSL_test():
     ssl_args = {
-        'secport': 636, 
-        'sourcedir': None, 
-        'secargs': {'nsSSLPersonalitySSL': 'localhost'}, 
-        'copy_nss_files': False
-        }
+        'secport': 636,
+        'sourcedir': None,
+        'secargs': {'nsSSLPersonalitySSL': 'localhost'},
+    }
     conn.setupSSL(**ssl_args)
+
 
 def setupBindDN_UID_test():
     # TODO change returning the entry instead of 0
