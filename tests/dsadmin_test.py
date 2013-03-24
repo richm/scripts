@@ -96,6 +96,10 @@ def setupChangelog_test():
     assert conn.setupChangelog(dbname="mockChangelogDb") == 0
 
 
+def setupChangelog_full_test():
+    assert conn.setupChangelog(dbname="/tmp/mockChangelogDb") == 0
+
+
 def prepare_master_replica_test():
     user = {
         'binddn': 'uid=rmanager,cn=config',

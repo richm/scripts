@@ -24,26 +24,31 @@ class TestEntry(object):
         e = Entry('no equal sign here')
 
     def test_init_with_tuple(self):
-        t = ('o=pippo', {
-             'o': ['pippo'],
+        expected = 'pippo'
+        given = 'o=pippo'
+        t = (given, {
+             'o': [expected],
              'objectclass': ['organization', 'top']
              })
         e = Entry(t)
-        assert e.dn == 'o=pippo'
-        assert 'pippo' in e.o
+        assert e.dn == given
+        assert expected in e.o
 
     def test_update(self):
+        expected = 'pluto minnie'
+        given = {'cn': expected}
         t = ('o=pippo', {
              'o': ['pippo'],
              'objectclass': ['organization', 'top']
              })
 
         e = Entry(t)
-        e.update({'cn': 'pluto'})
-        assert e.cn == 'pluto'
+        e.update(given)
+        assert e.cn == expected, "Bad cn: %s, expected: %s" % (e.cn, expected)
 
-    @SkipTest # is there a way to compare two entries?
+    #@SkipTest
     def test_update_complex(self):
+        # compare two entries created with different methods
         nsuffix, replid, replicatype = "dc=example,dc=com", 5, dsadmin.REPLICA_RDWR_TYPE
         binddnlist, legacy = ['uid=pippo, cn=config'], 'off'
         dn = "dc=example,dc=com"
@@ -61,17 +66,19 @@ class TestEntry(object):
         uentry = Entry((
             dn, {
             'objectclass': ["top", "nsds5replica", "extensibleobject"],
-            'cn': "replica",
+            'cn': ["replica"],
             })
         )
+        print uentry
         # Entry.update *replaces*, so be careful with multi-valued attrs
         uentry.update({
             'nsds5replicaroot': nsuffix,
             'nsds5replicaid': str(replid),
             'nsds5replicatype': str(replicatype),
-            'nds5flags': '1',
+            'nsds5flags': '1',
             'nsds5replicabinddn': binddnlist,
             'nsds5replicalegacyconsumer': legacy
         })
-
-        log.info("Mismatching entries %r vs %r" % (uentry, entry))
+        uentry_s, entry_s = map(str, (uentry, entry))
+        assert uentry_s == entry_s, "Mismatching entries [%r] vs [%r]" % (
+            uentry, entry)

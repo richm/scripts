@@ -32,6 +32,7 @@ import select
 
 from ldap.ldapobject import SimpleLDAPObject
 from ldapurl import LDAPUrl
+from ldap.cidict import cidict
 
 REPLBINDDN = ''
 REPLBINDPW = ''
@@ -51,6 +52,11 @@ REPLICA_RDWR_TYPE = REPLICA_RDONLY_TYPE | REPLICA_WRONLY_TYPE
 
 DBMONATTRRE = re.compile(r'^([a-zA-Z]+)-([1-9][0-9]*)$')
 DBMONATTRRESUN = re.compile(r'^([a-zA-Z]+)-([a-zA-Z]+)$')
+
+# Some DN constants
+DN_CONFIG = "cn=config"
+DN_LDBM = "cn=ldbm database,cn=plugins,cn=config"
+DN_MAPPING_TREE = "cn=mapping tree,cn=config"
 
 
 class Error(Exception):
@@ -73,16 +79,27 @@ class NoSuchEntryError(Error):
         return self.message
 
 
-class Entry:
+class Entry(object):
     """This class represents an LDAP Entry object.
 
         An LDAP entry consists of a DN and a list of attributes.
-        Each attribute consists of a name and a list of values.
+        Each attribute consists of a name and a *list* of values.
+        String values will be rendered badly!
+            ex. {
+                'uid': ['user01'],
+                'cn': ['User'],
+                'objectlass': [ 'person', 'inetorgperson' ]
+             }
+
         In python-ldap, entries are returned as a list of 2-tuples.
         Instance variables:
           dn - string - the string DN of the entry
           data - cidict - case insensitive dict of the attributes and values
     """
+    # the ldif class base64 encodes some attrs which I would rather see in raw form - to
+    # encode specific attrs as base64, add them to the list below
+    ldif.safe_string_re = re.compile('^$')
+    base64_attrs = ['nsstate']
 
     def __init__(self, entrydata):
         """entrydata is the raw data returned from the python-ldap
@@ -121,9 +138,9 @@ class Entry:
     def __getattr__(self, name):
         """If name is the name of an LDAP attribute, return the first value for that
         attribute - equivalent to getValue - this allows the use of
-        entry.cn
+            entry.cn
         instead of
-        entry.getValue('cn')
+            entry.getValue('cn')
         This also allows us to return None if an attribute is not found rather than
         throwing an exception"""
         if name == 'dn' or name == 'data':
@@ -198,12 +215,12 @@ class Entry:
 
     def update(self, dct):
         """Update passthru to the data attribute."""
-        self.data.update(dct)
-
-    # the ldif class base64 encodes some attrs which I would rather see in raw form - to
-    # encode specific attrs as base64, add them to the list below
-    ldif.safe_string_re = re.compile('^$')
-    base64_attrs = ['nsstate']
+        print "update with %s" % dct
+        for k, v in dct.items():
+            if hasattr(v, '__iter__'):
+                self.data[k] = v
+            else:
+                self.data[k] = [v]
 
     def __repr__(self):
         """Convert the Entry to its LDIF representation"""
@@ -220,7 +237,7 @@ class Entry:
         return sio.getvalue()
 
 
-class CSN:
+class CSN(object):
     """CSN is Change Sequence Number
         csn.ts is the timestamp (time_t - seconds)
         csn.seq is the sequence number (max 65535)
@@ -292,7 +309,7 @@ class CSN:
         return self.__repr__()
 
 
-class RUV:
+class RUV(object):
     """RUV is Replica Update Vector
         ruv.gen is the generation CSN
         ruv.rid[1] through ruv.rid[N] are dicts - the number (1-N) is the replica ID
@@ -485,7 +502,7 @@ class DSAdmin(SimpleLDAPObject):
         conffile = self.confdir + '/dse.ldif'
         try:
             dseldif = LDIFConn(conffile)
-            cnconfig = dseldif.get("cn=config")
+            cnconfig = dseldif.get(DN_CONFIG)
             if cnconfig:
                 return cnconfig.getValue(attrname)
         except IOError, err:
@@ -502,7 +519,7 @@ class DSAdmin(SimpleLDAPObject):
         if self.binddn and len(self.binddn) and not hasattr(self, 'sroot'):
             try:
                 ent = self.getEntry(
-                    'cn=config', ldap.SCOPE_BASE, '(objectclass=*)',
+                    DN_CONFIG, ldap.SCOPE_BASE, '(objectclass=*)',
                     ['nsslapd-instancedir', 'nsslapd-errorlog',
                      'nsslapd-certdir', 'nsslapd-schemadir'])
                 self.errlog = ent.getValue('nsslapd-errorlog')
@@ -533,7 +550,7 @@ class DSAdmin(SimpleLDAPObject):
                 else:
                     self.sroot = self.inst = ''
                 ent = self.getEntry(
-                    'cn=config,cn=ldbm database,cn=plugins,cn=config',
+                    'cn=config,' + DN_LDBM,
                     ldap.SCOPE_BASE, '(objectclass=*)',
                     ['nsslapd-directory'])
                 self.dbdir = os.path.dirname(ent.getValue('nsslapd-directory'))
@@ -548,14 +565,9 @@ class DSAdmin(SimpleLDAPObject):
                 raise
 
     def __localinit__(self):
-        if self.sslport:
-            proto = 'ldaps'
-            self.port = self.sslport
-        else:
-            proto = 'ldap'
+        uri = self.toLDAPURL()
 
-        SimpleLDAPObject.__init__(
-            self, '%s://%s:%d' % (proto, self.host, self.port))
+        SimpleLDAPObject.__init__(self, uri)
 
         # see if binddn is a dn or a uid that we need to lookup
         if self.binddn and not DSAdmin.is_a_dn(self.binddn):
@@ -602,7 +614,11 @@ class DSAdmin(SimpleLDAPObject):
         return self.host + ":" + str(self.port)
 
     def toLDAPURL(self):
-        return "ldap://%s:%d/" % (self.host, self.port)
+        """Return the uri ldap[s]://host:[ssl]port."""
+        if self.sslport:
+            return "ldaps://%s:%d/" % (self.host, self.sslport)
+        else:
+            return "ldap://%s:%d/" % (self.host, self.port)
 
     def getEntry(self, *args):
         """This wraps the search function.  It is common to just get one entry"""
@@ -897,7 +913,7 @@ class DSAdmin(SimpleLDAPObject):
         adder = LDIFAdder(input_file, self, cont)
 
     def getSuffixes(self):
-        ents = self.search_s("cn=mapping tree,cn=config", ldap.SCOPE_ONELEVEL)
+        ents = self.search_s(DN_MAPPING_TREE, ldap.SCOPE_ONELEVEL)
         sufs = []
         for ent in ents:
             unquoted = None
@@ -917,7 +933,7 @@ class DSAdmin(SimpleLDAPObject):
         return sufs
 
     def setupBackend(self, suffix, binddn=None, bindpw=None, urls=None, attrvals={}, benamebase=None):
-        ldbmdn = "cn=ldbm database,cn=plugins,cn=config"
+        ldbmdn = DN_LDBM
         chaindn = "cn=chaining database,cn=plugins,cn=config"
         dnbase = ""
         # if benamebase is set, try creating without appending
@@ -1011,13 +1027,13 @@ class DSAdmin(SimpleLDAPObject):
         filt = DSAdmin.suffixfilt(suffix)
         try:
             entry = self.getEntry(
-                "cn=mapping tree,cn=config", ldap.SCOPE_SUBTREE, filt)
+                DN_MAPPING_TREE, ldap.SCOPE_SUBTREE, filt)
         except NoSuchEntryError:
             entry = None
         if not entry:
             # fix me when we can actually used escaped DNs
             #dn = "cn=%s,cn=mapping tree,cn=config" % escapedn
-            dn = 'cn="%s",cn=mapping tree,cn=config' % nsuffix
+            dn = ','.join('cn="%s"' % nsuffix, DN_MAPPING_TREE)
             entry = Entry(dn)
             entry.setValues(
                 'objectclass', 'top', 'extensibleObject', 'nsMappingTree')
@@ -1057,7 +1073,7 @@ class DSAdmin(SimpleLDAPObject):
         entry = None
         try:
             entry = self.getEntry(
-                "cn=mapping tree,cn=config", ldap.SCOPE_ONELEVEL, filt, attrs)
+                DN_MAPPING_TREE, ldap.SCOPE_ONELEVEL, filt, attrs)
         except NoSuchEntryError:
             # TODO why not raise here?
             print ("Cannot find suffix in mapping tree: %r " % suffix)
@@ -1137,12 +1153,12 @@ class DSAdmin(SimpleLDAPObject):
 
     def getDBStats(self, suffix, bename=''):
         if bename:
-            dn = "cn=monitor,cn=%s,cn=ldbm database,cn=plugins,cn=config" % bename
+            dn = ','.join("cn=monitor,cn=%s" % bename, DN_LDBM)
         else:
             beents = self.getBackendsForSuffix(suffix)
             dn = "cn=monitor," + beents[0].dn
-        dbmondn = "cn=monitor,cn=ldbm database,cn=plugins,cn=config"
-        dbdbdn = "cn=database,cn=monitor,cn=ldbm database,cn=plugins,cn=config"
+        dbmondn = "cn=monitor," + DN_LDBM
+        dbdbdn = "cn=database,cn=monitor," + DN_LDBM
         try:
             # entrycache and dncache stats
             ent = self.getEntry(dn, ldap.SCOPE_BASE)
@@ -1375,12 +1391,12 @@ class DSAdmin(SimpleLDAPObject):
 
     def setLogLevel(self, *vals):
         val = reduce(operator.add, vals)
-        self.modify_s('cn=config', [(ldap.MOD_REPLACE,
+        self.modify_s(DN_CONFIG, [(ldap.MOD_REPLACE,
                       'nsslapd-errorlog-level', str(val))])
 
     def setAccessLogLevel(self, *vals):
         val = reduce(operator.add, vals)
-        self.modify_s('cn=config', [(
+        self.modify_s(DN_CONFIG, [(
             ldap.MOD_REPLACE, 'nsslapd-accesslog-level', str(val))])
 
     def setupChainingIntermediate(self):
@@ -1420,19 +1436,24 @@ class DSAdmin(SimpleLDAPObject):
         self.setupChainingMux(
             suffix, isIntermediate, binddn, bindpw, to.toLDAPURL())
 
-    def setupChangelog(self, dirpath='', dbname='changelogdb'):
+    def setupChangelog(self, dirpath=None, dbname='changelogdb'):
         """Setup the replication changelog.
             Return 0 on success
 
+            If dbname starts with "/" then it's considered a full path and dirpath is skipped
             TODO: why dirpath="" and not None?
+            TODO: remove dirpath?
             TODO: why not return changelog entry and raise on fault
         """
         dn = "cn=changelog5,cn=config"
         dirpath = os.path.join(dirpath or self.dbdir, dbname)
         entry = Entry(dn)
-        entry.setValues('objectclass', "top", "extensibleobject")
-        entry.setValues('cn', "changelog5")
-        entry.setValues('nsslapd-changelogdir', dirpath)
+        entry.update({
+            'objectclass': ("top", "extensibleobject"),
+            'cn': "changelog5",
+            'nsslapd-changelogdir': dirpath
+        })
+        print entry
         try:
             self.add_s(entry)
         except ldap.ALREADY_EXISTS:
@@ -1690,6 +1711,7 @@ class DSAdmin(SimpleLDAPObject):
 
 
         """
+        assert args.get('binddn') and args.get('bindpw')
         suffix = args['suffix']
         nsuffix = DSAdmin.normalizeDN(suffix)
         othhost, othport, othsslport = (
@@ -1720,19 +1742,20 @@ class DSAdmin(SimpleLDAPObject):
             return dn
 
         entry = Entry(dn)
-        binddn = args.get('binddn', REPLBINDDN)
-        bindpw = args.get('bindpw', REPLBINDPW)
-        entry.setValues('objectclass', "top", "nsds5replicationagreement")
-        entry.setValues('cn', cn)
-        entry.setValues('nsds5replicahost', othhost)
-        entry.setValues('nsds5replicatimeout', str(args.get('timeout', 120)))
-        entry.setValues('nsds5replicabinddn', binddn)
-        entry.setValues('nsds5replicacredentials', bindpw)
-        entry.setValues(
-            'nsds5replicabindmethod', args.get('bindmethod', 'simple'))
-        entry.setValues('nsds5replicaroot', nsuffix)
-        entry.setValues('nsds5replicaupdateschedule', '0000-2359 0123456')
-        entry.setValues('description', "me to %s%d" % (othhost, othport))
+        binddn = args.get('binddn')
+        bindpw = args.get('bindpw')
+        entry.update({
+            'objectclass': ["top", "nsds5replicationagreement"],
+            'cn': cn,
+            'nsds5replicahost': othhost,
+            'nsds5replicatimeout': str(args.get('timeout', 120)),
+            'nsds5replicabinddn': binddn,
+            'nsds5replicacredentials': bindpw,
+            'nsds5replicabindmethod': args.get('bindmethod', 'simple'),
+            'nsds5replicaroot': nsuffix,
+            'nsds5replicaupdateschedule': '0000-2359 0123456',
+            'description': "me to %s%d" % (othhost, othport)
+        })
         if 'starttls' in args:
             entry.setValues('nsds5replicatransportinfo', 'TLS')
             entry.setValues('nsds5replicaport', str(othport))
@@ -1786,7 +1809,7 @@ class DSAdmin(SimpleLDAPObject):
         if not attrs:
             attrs.append('cn')
         ents = self.search_s(
-            "cn=mapping tree,cn=config", ldap.SCOPE_SUBTREE, realfilt, attrs)
+            DN_MAPPING_TREE, ldap.SCOPE_SUBTREE, realfilt, attrs)
         return [ent.dn for ent in ents]
 
     def getReplicaEnts(self, suffix=None):
@@ -1795,7 +1818,7 @@ class DSAdmin(SimpleLDAPObject):
         else:
             filt = "(objectclass=nsds5Replica)"
         ents = self.search_s(
-            "cn=mapping tree,cn=config", ldap.SCOPE_SUBTREE, filt)
+            DN_MAPPING_TREE, ldap.SCOPE_SUBTREE, filt)
         return ents
 
     def getReplStatus(self, agmtdn):
@@ -2030,7 +2053,7 @@ class DSAdmin(SimpleLDAPObject):
         self.setDNPwdPolicy(poldn, pwdpolicy, **pwdargs)
 
     def setPwdPolicy(self, pwdpolicy, **pwdargs):
-        self.setDNPwdPolicy("cn=config", pwdpolicy, **pwdargs)
+        self.setDNPwdPolicy(DN_CONFIG, pwdpolicy, **pwdargs)
 
     def setDNPwdPolicy(self, dn, pwdpolicy, **pwdargs):
         """input is dict of attr/vals"""
@@ -2079,7 +2102,7 @@ class DSAdmin(SimpleLDAPObject):
         except ldap.ALREADY_EXISTS:
             pass
 
-        dn_config = 'cn=config'
+        dn_config = DN_CONFIG
         mod = [
             (ldap.MOD_REPLACE,
                 'nsslapd-security', secargs.get('nsslapd-security', 'on')),
@@ -2130,7 +2153,7 @@ class DSAdmin(SimpleLDAPObject):
         elif tryrepl:
             print "Could not get RUV from", suffix, "entry - trying cn=replica"
             ensuffix = DSAdmin.escapeDNValue(DSAdmin.normalizeDN(suffix))
-            dn = "cn=replica,cn=%s,cn=mapping tree,cn=config" % ensuffix
+            dn = ','.join("cn=replica,cn=%s" % ensuffix, DN_MAPPING_TREE)
             ents = self.search_s(dn, ldap.SCOPE_BASE, "objectclass=*", attrs)
         if ents and (len(ents) > 0):
             ent = ents[0]
@@ -2342,7 +2365,7 @@ class DSAdmin(SimpleLDAPObject):
         did not specify a server root directory"""
         if cfgconn and 'sroot' not in args and isLocal:
             ent = cfgconn.getEntry(
-                "cn=config", ldap.SCOPE_BASE, "(objectclass=*)",
+                DN_CONFIG, ldap.SCOPE_BASE, "(objectclass=*)",
                 ['nsslapd-instancedir'])
             if ent:
                 args['sroot'] = os.path.dirname(
@@ -2768,7 +2791,7 @@ def testit():
     binddn = "cn=directory manager"
     bindpw = "secret12"
 
-    basedn = "cn=config"
+    basedn = DN_CONFIG
     scope = ldap.SCOPE_BASE
     filt = "(objectclass=*)"
 
@@ -2797,7 +2820,7 @@ def testit():
 #     m1.start(True)
         cn = m1.setupBackend("dc=example2,dc=com")
         rc = m1.setupSuffix("dc=example2,dc=com", cn)
-        entry = m1.getEntry("cn=config", ldap.SCOPE_SUBTREE, "(cn=" + cn + ")")
+        entry = m1.getEntry(DN_CONFIG, ldap.SCOPE_SUBTREE, "(cn=" + cn + ")")
         print "new backend entry is:"
         print entry
         print entry.getValues('objectclass')
