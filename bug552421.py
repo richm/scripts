@@ -1,10 +1,12 @@
+from bug_harness import DSAdminHarness as DSAdmin
+from dsadmin import Entry
+
 import os
 import sys
 import time
 import ldap
 import pprint
 import base64, hashlib
-from dsadmin import DSAdmin, Entry
 
 host1 = "localhost.localdomain"
 cfgport = 1100

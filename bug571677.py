@@ -1,9 +1,11 @@
+from bug_harness import DSAdminHarness as DSAdmin
+from dsadmin import Entry, LEAF_TYPE
+
 
 import os
 import sys
 import ldap
 import time
-from dsadmin import DSAdmin, Entry, LEAF_TYPE
 
 host1 = "localhost.localdomain"
 if len(sys.argv) > 1:

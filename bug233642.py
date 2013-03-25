@@ -1,3 +1,6 @@
+from bug_harness import DSAdminHarness as DSAdmin
+from dsadmin import Entry
+
 
 import os
 import sys

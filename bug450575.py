@@ -1,3 +1,6 @@
+from bug_harness import DSAdminHarness as DSAdmin
+from dsadmin import Entry
+
 
 import os
 import sys
@@ -5,7 +8,6 @@ import time
 import ldap
 from ldap.controls import LDAPControl
 from ldap.ldapobject import LDAPObject
-from dsadmin import DSAdmin, Entry
 import pprint
 
 class TestCtrl(LDAPControl):

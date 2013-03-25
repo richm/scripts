@@ -1,3 +1,6 @@
+from bug_harness import DSAdminHarness as DSAdmin
+from dsadmin import Entry
+
 
 import os
 import sys
@@ -5,7 +8,6 @@ import time
 import ldap
 from ldap.controls import LDAPControl
 import struct
-from dsadmin import DSAdmin, Entry
 from dirsyncctrl import DirSyncCtrl
 
 if os.environ.has_key('WINSYNC_USE_DS'):

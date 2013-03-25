@@ -1,9 +1,11 @@
+from bug_harness import DSAdminHarness as DSAdmin
+from dsadmin import Entry
+
 
 import os
 import sys
 import time
 import ldap
-from dsadmin import DSAdmin, Entry, NoSuchEntryError
 
 host1 = "vmf8i386"
 host2 = "vmf9x8664"

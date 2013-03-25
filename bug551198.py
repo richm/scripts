@@ -1,3 +1,6 @@
+from bug_harness import DSAdminHarness as DSAdmin
+from dsadmin import Entry
+
 
 import os
 import time
@@ -5,7 +8,6 @@ import ldap
 import ldapurl
 import ldif
 import tempfile
-from dsadmin import DSAdmin, Entry
 from ldap.ldapobject import SimpleLDAPObject
 import pprint
 

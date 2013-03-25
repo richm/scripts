@@ -12,6 +12,18 @@ class config(object):
             'bindpw': 'password'}
 
 
+class MockDSAdmin(object):
+    host = 'localhost'
+    port = 389
+    sslport = 0
+
+    def __str__(self):
+        if self.sslport:
+            return 'ldaps://%s:%s' % (self.host, self.sslport)
+        else:
+            return 'ldap://%s:%s' % (self.host, self.port)
+
+
 conn = None
 
 
@@ -61,6 +73,7 @@ def addreplica_write_test():
     assert ret == 0, "Error in setup replica: %s" % ret
 
 
+@SkipTest
 def setupSSL_test():
     ssl_args = {
         'secport': 636,
@@ -96,6 +109,10 @@ def setupChangelog_test():
     assert conn.setupChangelog(dbname="mockChangelogDb") == 0
 
 
+def setupChangelog_full_test():
+    assert conn.setupChangelog(dbname="/tmp/mockChangelogDb") == 0
+
+
 def prepare_master_replica_test():
     user = {
         'binddn': 'uid=rmanager,cn=config',
@@ -105,3 +122,18 @@ def prepare_master_replica_test():
     conn.setupBindDN(**user)
     # only for Writable
     conn.setupChangelog()
+
+
+def setupAgreement_test():
+
+    consumer = MockDSAdmin()
+    args = {
+        'suffix': "o=addressbook6",
+        #'bename': "userRoot",
+        'binddn': "uid=rmanager,cn=config",
+        'bindpw': "password",
+        'type': dsadmin.MASTER_TYPE
+    }
+    conn.setupReplica(args)
+    dn_replica = conn.setupAgreement(consumer, args)
+    print dn_replica

@@ -1,9 +1,11 @@
+from bug_harness import DSAdminHarness as DSAdmin
+from dsadmin import Entry
+
 
 import os
 import sys
 import ldap
 import time
-from dsadmin import DSAdmin, Entry, LEAF_TYPE
 
 def verifyUpdateSent(mmx, mmy, meth, methargs, dn, attrvals):
     '''verify that an update was sent from mmx to mmy'''
