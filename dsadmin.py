@@ -64,19 +64,11 @@ class Error(Exception):
 
 
 class InvalidArgumentError(Error):
-    def __init__(self, message):
-        self.message = message
-
-    def __repr__(self):
-        return self.message
+    pass
 
 
 class NoSuchEntryError(Error):
-    def __init__(self, message):
-        self.message = message
-
-    def __repr__(self):
-        return self.message
+    pass
 
 
 class Entry(object):
@@ -621,7 +613,10 @@ class DSAdmin(SimpleLDAPObject):
             return "ldap://%s:%d/" % (self.host, self.port)
 
     def getEntry(self, *args):
-        """This wraps the search function.  It is common to just get one entry"""
+        """Wrapper around SimpleLDAPObject.search. It is common to just get one entry.
+
+            eg. getEntry(dn, scope, filter, attributes)
+        """
         res = self.search(*args)
         restype, obj = self.result(res)
         # TODO: why not test restype?
@@ -1552,15 +1547,15 @@ class DSAdmin(SimpleLDAPObject):
             raise NoSuchEntryError(
                 "Error: no such suffix in Mapping Tree: %s" % suffix)
 
-        dn = "cn=replica," + mtent.dn
+        dn_replica = "cn=replica," + mtent.dn
         try:
-            entry = self.getEntry(dn, ldap.SCOPE_BASE)
+            entry = self.getEntry(dn_replica, ldap.SCOPE_BASE)
         except ldap.NO_SUCH_OBJECT:
             entry = None
         if entry:
             print "Already setup replica for suffix", suffix
             rec = self.suffixes.setdefault(nsuffix, {})
-            rec['dn'] = dn
+            rec['dn'] = dn_replica
             rec['type'] = repltype
             return 0
 
@@ -1582,7 +1577,7 @@ class DSAdmin(SimpleLDAPObject):
         else:
             REPLICAID = replid  # use given id for internal counter
 
-        entry = Entry(dn)
+        entry = Entry(dn_replica)
         entry.setValues(
             'objectclass', "top", "nsds5replica", "extensibleobject")
         entry.setValues('cn', "replica")
@@ -1606,13 +1601,13 @@ class DSAdmin(SimpleLDAPObject):
         self.add_s(entry)
 
         # check if the entry exists TODO better to raise!
-        entry = self.getEntry(dn, ldap.SCOPE_BASE)
+        entry = self.getEntry(dn_replica, ldap.SCOPE_BASE)
         if not entry:
-            print "Entry %s was added successfully, but I cannot search it" % dn
+            print "Entry %s was added successfully, but I cannot search it" % dn_replica
             return -1
         elif self.verbose:
             print entry
-        self.suffixes[nsuffix] = {'dn': dn, 'type': repltype}
+        self.suffixes[nsuffix] = {'dn': dn_replica, 'type': repltype}
         return 0
 
     def setupBindDN(self, binddn=REPLBINDDN, bindpw=REPLBINDPW):
@@ -1691,14 +1686,15 @@ class DSAdmin(SimpleLDAPObject):
 
     # args - DSAdmin consumer (repoth), suffix, binddn, bindpw, timeout
     # also need an auto_init argument
-    def setupAgreement(self, repoth, args):
-        """Create a replication agreement from self to repoth - that is, self is the
-        supplier and repoth is the DSAdmin object for the consumer (the consumer
-        can be a master)
+    def setupAgreement(self, consumer, args, cn_format=r'meTo_%s:%s', description_format=r'me to %s:%s'):
+        """Create (and return) a replication agreement from self to consumer.
+            - self is the supplier,
+            - consumer is a DSAdmin object (consumer can be a master)
+            - cn_format - use this string to format the agreement name
 
-        repoth:
+        consumer:
             * a DSAdmin object if chaining
-            * an object with attributes: host, port, sslport
+            * an object with attributes: host, port, sslport, __str__
 
         args =  {
         'suffix': "dc=example,dc=com",
@@ -1706,44 +1702,55 @@ class DSAdmin(SimpleLDAPObject):
         'binddn': "cn=replrepl,cn=config",
         'bindcn': "replrepl", # so I need it?
         'bindpw': "replrepl",
-        'log'   : True
+        'bindmethod': 'simple',
+        'log'   : True.
+        'timeout': 120
         }
 
-
+            self.suffixes is of the form {
+                'o=suffix1': 'ldaps://consumer.example.com:636',
+                'o=suffix2': 'ldap://consumer.example.net:3890'
+            }
         """
         assert args.get('binddn') and args.get('bindpw')
         suffix = args['suffix']
+        binddn = args.get('binddn')
+        bindpw = args.get('bindpw')
+
         nsuffix = DSAdmin.normalizeDN(suffix)
         othhost, othport, othsslport = (
-            repoth.host, repoth.port, repoth.sslport)
+            consumer.host, consumer.port, consumer.sslport)
         othport = othsslport or othport
-        cn = "meTo%s:%d" % (othhost, othport)
-        if not nsuffix in self.suffixes:  # adding agreement to previously created replica
+
+        # adding agreement to previously created replica
+        # eventually setting self.suffixes dict.
+        if not nsuffix in self.suffixes:
             replents = self.getReplicaEnts(suffix)
             if not replents:
-                raise Exception(
+                raise NoSuchEntryError(
                     "Error: no replica set up for suffix " + suffix)
             replent = replents[0]
             self.suffixes[nsuffix] = {
                 'dn': replent.dn,
                 'type': int(replent.nsds5replicatype)
             }
-        dn = "cn=%s,%s" % (cn, self.suffixes[nsuffix]['dn'])
+        # define agreement entry
+        cn = cn_format % (othhost, othport)
+        dn_agreement = "cn=%s,%s" % (cn, self.suffixes[nsuffix]['dn'])
         try:
-            entry = self.getEntry(dn, ldap.SCOPE_BASE)
+            entry = self.getEntry(dn_agreement, ldap.SCOPE_BASE)
         except ldap.NO_SUCH_OBJECT:
             entry = None
         if entry:
-            print "Agreement exists:", dn
-            self.suffixes.setdefault(nsuffix, {})[str(repoth)] = dn
-            return dn
-        if (nsuffix in self.agmt) and (repoth in self.agmt[nsuffix]):
-            print "Agreement exists:", dn
-            return dn
+            print "Agreement exists:", dn_agreement
+            self.suffixes.setdefault(nsuffix, {})[str(consumer)] = dn_agreement
+            return dn_agreement
+        if (nsuffix in self.agmt) and (consumer in self.agmt[nsuffix]):
+            print "Agreement exists:", dn_agreement
+            return dn_agreement
 
-        entry = Entry(dn)
-        binddn = args.get('binddn')
-        bindpw = args.get('bindpw')
+        # In a separate function in this scope?
+        entry = Entry(dn_agreement)
         entry.update({
             'objectclass': ["top", "nsds5replicationagreement"],
             'cn': cn,
@@ -1754,7 +1761,7 @@ class DSAdmin(SimpleLDAPObject):
             'nsds5replicabindmethod': args.get('bindmethod', 'simple'),
             'nsds5replicaroot': nsuffix,
             'nsds5replicaupdateschedule': '0000-2359 0123456',
-            'description': "me to %s%d" % (othhost, othport)
+            'description': description_format % (othhost, othport)
         })
         if 'starttls' in args:
             entry.setValues('nsds5replicatransportinfo', 'TLS')
@@ -1774,23 +1781,46 @@ class DSAdmin(SimpleLDAPObject):
         if 'stripattrs' in args:
             entry.setValues('nsds5ReplicaStripAttrs', args['stripattrs'])
 
-        self.setupWinSyncAgmt(args, entry)
+        if 'winsync' in args:  # state it clearly!
+            self.setupWinSyncAgmt(args, entry)
+
         try:
+            print "Replica agreement: [%s]" % entry
             self.add_s(entry)
         except:
+            #  TODO check please!
             raise
-        entry = self.waitForEntry(dn)
+        entry = self.waitForEntry(dn_agreement)
         if entry:
-            self.suffixes.setdefault(nsuffix, {})[str(repoth)] = dn
-            chain = 'chain' in args
-            if chain and self.suffixes[nsuffix]['type'] == MASTER_TYPE:
-                self.setupChainingFarm(suffix, binddn, bindpw)
-            if chain and repoth.suffixes[nsuffix]['type'] == LEAF_TYPE:
-                repoth.setupConsumerChainOnUpdate(suffix, 0, binddn, bindpw, self.toLDAPURL(), args['chainargs'])
-            elif chain and repoth.suffixes[nsuffix]['type'] == HUB_TYPE:
-                repoth.setupConsumerChainOnUpdate(suffix, 1, binddn, bindpw, self.toLDAPURL(), args['chainargs'])
-        self.agmt.setdefault(nsuffix, {})[repoth] = dn
-        return dn
+            self.suffixes.setdefault(nsuffix, {})[str(consumer)] = dn_agreement
+            # More verbose but shows what's going on
+            if 'chain' in args:
+                chain_args = {
+                    'suffix': suffix,
+                    'binddn': binddn,
+                    'bindpw': bindpw
+                }
+                # Work on `self` aka producer
+                if self.suffixes[nsuffix]['type'] == MASTER_TYPE:
+                    self.setupChainingFarm(**chain_args)
+                # Work on `consumer`
+                # TODO - is it really required?
+                if consumer.suffixes[nsuffix]['type'] == LEAF_TYPE:
+                    chain_args.update({
+                        'isIntermediate': 0,
+                        'urls': self.toLDAPURL(),
+                        'args': args['chainargs']
+                    })
+                    consumer.setupConsumerChainOnUpdate(**chain_args)
+                elif consumer.suffixes[nsuffix]['type'] == HUB_TYPE:
+                    chain_args.update({
+                        'isIntermediate': 1,
+                        'urls': self.toLDAPURL(),
+                        'args': args['chainargs']
+                    })
+                    consumer.setupConsumerChainOnUpdate(**chain_args)
+        self.agmt.setdefault(nsuffix, {})[consumer] = dn_agreement
+        return dn_agreement
 
     def stopReplication(self, agmtdn):
         mod = [(
@@ -1813,12 +1843,16 @@ class DSAdmin(SimpleLDAPObject):
         return [ent.dn for ent in ents]
 
     def getReplicaEnts(self, suffix=None):
+        """Return a list of replica entries under the given suffix.
+
+            If suffix is None, all replica entries under mapping tree
+            are retrieved.
+        """
         if suffix:
             filt = "(&(objectclass=nsds5Replica)(nsds5replicaroot=%s))" % suffix
         else:
             filt = "(objectclass=nsds5Replica)"
-        ents = self.search_s(
-            DN_MAPPING_TREE, ldap.SCOPE_SUBTREE, filt)
+        ents = self.search_s(DN_MAPPING_TREE, ldap.SCOPE_SUBTREE, filt)
         return ents
 
     def getReplStatus(self, agmtdn):
