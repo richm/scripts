@@ -1,9 +1,11 @@
+from bug_harness import DSAdminHarness as DSAdmin
+from dsadmin import Entry
+
 import os
 import sys
 import time
 import shutil
 import ldap
-from dsadmin import DSAdmin, Entry, LEAF_TYPE
 from ldap.controls import SimplePagedResultsControl
 
 print "start"

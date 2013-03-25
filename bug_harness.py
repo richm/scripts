@@ -1,8 +1,10 @@
+from bug_harness import DSAdminHarness as DSAdmin
+from dsadmin import Entry
+
 """
     An harness for bug replication.
 
 """
-from dsadmin import DSAdmin, Entry, REPLBINDDN, REPLBINDPW
 import os
 
 

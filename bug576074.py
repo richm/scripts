@@ -1,3 +1,6 @@
+from bug_harness import DSAdminHarness as DSAdmin
+from dsadmin import Entry
+
 
 import sys
 import os
@@ -5,7 +8,6 @@ import time
 import ldap
 import ldapurl
 import ldif
-from dsadmin import DSAdmin, Entry
 import pprint
 
 host1 = "localhost.localdomain"

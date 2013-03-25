@@ -1,9 +1,11 @@
+from bug_harness import DSAdminHarness as DSAdmin
+from dsadmin import Entry
+
 
 import os
 import sys
 import ldap
 import time
-from dsadmin import DSAdmin, Entry
 
 host1 = "localhost.localdomain"
 host2 = host1
