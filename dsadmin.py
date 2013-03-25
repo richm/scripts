@@ -57,6 +57,7 @@ DBMONATTRRESUN = re.compile(r'^([a-zA-Z]+)-([a-zA-Z]+)$')
 DN_CONFIG = "cn=config"
 DN_LDBM = "cn=ldbm database,cn=plugins,cn=config"
 DN_MAPPING_TREE = "cn=mapping tree,cn=config"
+DN_CHAIN = "cn=chaining database,cn=plugins,cn=config"
 
 
 class Error(Exception):
@@ -68,6 +69,11 @@ class InvalidArgumentError(Error):
 
 
 class NoSuchEntryError(Error):
+    pass
+
+
+class MissingEntryError(NoSuchEntryError):
+    """When just added entries are missing."""
     pass
 
 
@@ -584,25 +590,34 @@ class DSAdmin(SimpleLDAPObject):
                     needtls = True
             self.__initPart2()
 
-    def __init__(self, host, port, binddn='', bindpw='', nobind=False, sslport=0):  # default to anon bind
-        """We just set our instance variables and wrap the methods - the real work is
-        done in __localinit__ and __initPart2 - these are separated out this way so
-        that we can call them from places other than instance creation e.g. when
-        using the start command, we just need to reconnect, not create a new instance"""
+    def __init__(self, host, port=389, binddn='', bindpw='', nobind=False, sslport=0, verbose=False):  # default to anon bind
+        """We just set our instance variables and wrap the methods.
+            The real work is done in the following methods, reused during
+            instance creation & co.
+                * __localinit__
+                * __initPart2
+
+            e.g. when using the start command, we just need to reconnect,
+             not create a new instance"""
         self.__wrapmethods()
-        self.verbose = False
-        self.port = port or 389
+        self.verbose = verbose
+        self.port = port
         self.sslport = sslport
         self.host = host
         self.binddn = binddn
         self.bindpw = bindpw
         self.nobind = nobind
         self.isLocal = DSAdmin.isLocalHost(host)
+        #
+        # dict caching DS structure
+        #
         self.suffixes = {}
         self.agmt = {}
+        # the real init
         self.__localinit__()
 
     def __str__(self):
+        """XXX and in SSL case?"""
         return self.host + ":" + str(self.port)
 
     def toLDAPURL(self):
@@ -616,15 +631,18 @@ class DSAdmin(SimpleLDAPObject):
         """Wrapper around SimpleLDAPObject.search. It is common to just get one entry.
 
             eg. getEntry(dn, scope, filter, attributes)
+
+            XXX This cannot return None
         """
         res = self.search(*args)
         restype, obj = self.result(res)
         # TODO: why not test restype?
         if not obj:
-            raise NoSuchEntryError("no such entry for " + str(args) + "\n")
+            raise NoSuchEntryError("no such entry for %r" % [args])
         elif isinstance(obj, Entry):
             return obj
         else:  # assume list/tuple
+            assert obj[0] is not None, "None entry!"  # TEST CODE
             return obj[0]
 
     def __wrapmethods(self):
@@ -637,7 +655,7 @@ class DSAdmin(SimpleLDAPObject):
             if callable(attr):
                 setattr(self, name, wrapper(attr, name))
 
-    def serverCmd(self, cmd, verbose, timeout):
+    def serverCmd(self, cmd, verbose, timeout=120):
         instanceDir = self.sroot + "/slapd-" + self.inst
         errLog = instanceDir + '/logs/errors'
         if hasattr(self, 'errlog'):
@@ -652,7 +670,6 @@ class DSAdmin(SimpleLDAPObject):
         else:
             cmdPat = 'slapd stopped.'
 
-        timeout = timeout or 120  # default is 120 seconds
         if "USE_GDB" in os.environ or "USE_VALGRIND" in os.environ:
             timeout = timeout * 3
         timeout = int(time.time()) + timeout
@@ -843,9 +860,9 @@ class DSAdmin(SimpleLDAPObject):
         entry.setValues('objectclass', 'top', 'extensibleObject')
         entry.setValues('cn', cn)
         entry.setValues('nsIndexAttribute', attr)
-        beents = self.getBackendsForSuffix(suffix, ['cn'])
+        entries_backend = self.getBackendsForSuffix(suffix, ['cn'])
         # assume 1 local backend
-        entry.setValues('nsInstance', beents[0].cn)
+        entry.setValues('nsInstance', entries_backend[0].cn)
         rc = self.startTaskAndWait(entry, verbose)
 
         if rc:
@@ -927,24 +944,25 @@ class DSAdmin(SimpleLDAPObject):
                     "Error: mapping tree entry " + ent.dn + " has no suffix")
         return sufs
 
-    def setupBackend(self, suffix, binddn=None, bindpw=None, urls=None, attrvals={}, benamebase=None):
-        ldbmdn = DN_LDBM
-        chaindn = "cn=chaining database,cn=plugins,cn=config"
+    def setupBackend(self, suffix, binddn=None, bindpw=None, urls=None, attrvals={}, benamebase=None, verbose=False):
+        """Setup a backend and return its dn. Blank on error
+
+            FIXME: avoid duplicate backends
+        """
         dnbase = ""
         # if benamebase is set, try creating without appending
         if benamebase:
             benum = 0
         else:
             benum = 1
-        verbose = False
 
         # figure out what type of be based on args
         if binddn and bindpw and urls:  # its a chaining be
             benamebase = benamebase or "chaindb"
-            dnbase = chaindn
+            dnbase = DN_CHAIN
         else:  # its a ldbm be
             benamebase = benamebase or "localdb"
-            dnbase = ldbmdn
+            dnbase = DN_LDBM
 
         print "benamebase: " + benamebase
         nsuffix = DSAdmin.normalizeDN(suffix)
@@ -957,20 +975,24 @@ class DSAdmin(SimpleLDAPObject):
                 # incremented and the suffix is appended
                 # to the cn
                 if benum:
-                                cn = benamebase + str(benum)  # e.g. localdb1
+                    cn = benamebase + str(benum)  # e.g. localdb1
                 else:
-                                cn = benamebase
+                    cn = benamebase
                 print "create backend with cn: %s" % cn
                 dn = "cn=" + cn + "," + dnbase
                 entry = Entry(dn)
-                entry.setValues('objectclass', 'top',
-                                'extensibleObject', 'nsBackendInstance')
-                entry.setValues('cn', cn)
-                entry.setValues('nsslapd-suffix', nsuffix)
+                entry.update({
+                    'objectclass': ['top', 'extensibleObject', 'nsBackendInstance'],
+                    'cn': cn,
+                    'nsslapd-suffix': nsuffix
+                })
+
                 if binddn and bindpw and urls:  # its a chaining be
-                    entry.setValues('nsfarmserverurl', urls)
-                    entry.setValues('nsmultiplexorbinddn', binddn)
-                    entry.setValues('nsmultiplexorcredentials', bindpw)
+                    entry.update({
+                                 'nsfarmserverurl': urls,
+                                 'nsmultiplexorbinddn': binddn,
+                                 'nsmultiplexorcredentials': bindpw
+                                 })
                 else:  # set ldbm parameters, if any
                     pass
                     #     $entry->add('nsslapd-cachesize' => '-1');
@@ -993,15 +1015,16 @@ class DSAdmin(SimpleLDAPObject):
                 print "Could not add backend entry " + dn, e
                 raise
         if verbose:
-            entry = self.getEntry(dn, ldap.SCOPE_BASE)
-            if not entry:
-                print "Backend entry added, but could not be searched"
-                return ""
-            else:
+            try:
+                entry = self.getEntry(dn, ldap.SCOPE_BASE)
                 print entry
+            except NoSuchEntryError:
+                raise MissingEntryError(
+                    "Backend entry added, but could not be searched")
+
         return cn
 
-    def setupSuffix(self, suffix, bename, parent=""):
+    def setupSuffix(self, suffix, bename, parent="", verbose=False):
         """Setup a suffix with the given backend-name.
 
             This method does not create the matching entry in the tree.
@@ -1013,93 +1036,90 @@ class DSAdmin(SimpleLDAPObject):
                     - the ldap entry "o=addressbook1"
         """
         rc = 0
-        verbose = False
         nsuffix = DSAdmin.normalizeDN(suffix)
         #escapedn = DSAdmin.escapeDNValue(nsuffix)
         nparent = ""
         if parent:
             nparent = DSAdmin.normalizeDN(parent)
         filt = DSAdmin.suffixfilt(suffix)
+        # if suffix exists, return
         try:
             entry = self.getEntry(
                 DN_MAPPING_TREE, ldap.SCOPE_SUBTREE, filt)
+            if verbose:
+                print entry
+            return rc
         except NoSuchEntryError:
             entry = None
-        if not entry:
-            # fix me when we can actually used escaped DNs
-            #dn = "cn=%s,cn=mapping tree,cn=config" % escapedn
-            dn = ','.join('cn="%s"' % nsuffix, DN_MAPPING_TREE)
-            entry = Entry(dn)
-            entry.setValues(
-                'objectclass', 'top', 'extensibleObject', 'nsMappingTree')
-            #entry.setValues('cn', [escapedn, nsuffix]) # the value in the dn has to be DN escaped
-            # the other value can be the unescaped value
-            entry.setValues('cn', nsuffix)  # internal code will add the quoted value - unquoted value is useful for searching
-            entry.setValues('nsslapd-state', 'backend')
-            entry.setValues('nsslapd-backend', bename)
-            if parent:
-                entry.setValues('nsslapd-parent-suffix', nparent)
+
+        # fix me when we can actually used escaped DNs
+        #dn = "cn=%s,cn=mapping tree,cn=config" % escapedn
+        dn = ','.join('cn="%s"' % nsuffix, DN_MAPPING_TREE)
+        entry = Entry(dn)
+        entry.update({
+            'objectclass': ['top', 'extensibleObject', 'nsMappingTree'],
+            'nsslapd-state': 'backend',
+            # the value in the dn has to be DN escaped
+            # internal code will add the quoted value - unquoted value is useful for searching
+            'cn': nsuffix,
+            'nsslapd-backend': bename
+        })
+        #entry.setValues('cn', [escapedn, nsuffix]) # the value in the dn has to be DN escaped
+        # the other value can be the unescaped value
+        if parent:
+            entry.setValues('nsslapd-parent-suffix', nparent)
+        try:
+            self.add_s(entry)
+        except ldap.LDAPError, e:
+            raise LDAPError("Error adding suffix entry " + dn, e)
+
+        if verbose:
             try:
-                self.add_s(entry)
-                if verbose:
-                    entry = self.getEntry(dn, ldap.SCOPE_BASE)
-                    if not entry:
-                        print "Entry %s was added successfully, but I cannot search it" % dn
-                        rc = -1
-                    else:
-                        print entry
-            except ldap.LDAPError, e:
-                print "Error adding suffix entry " + dn, e
-                raise
-        else:
-            if verbose:
-                print "Suffix entry already exists:"
+                entry = self.getEntry(dn, ldap.SCOPE_BASE)
                 print entry
+            except NoSuchEntryError:
+                raise MissingEntryError("Entry %s was added successfully, but I cannot search it" % dn)
 
         return rc
 
-    def getMTEntry(self, suffix, attrs=[]):
+    def getMTEntry(self, suffix, attrs=None):
         """Given a suffix, return the mapping tree entry for it.  If attrs is
         given, only fetch those attributes, otherwise, get all attributes.
-
-        TODO: returned None if not found. Now raises
         """
-        filt = DSAdmin.suffixfilt(suffix)
-        entry = None
+        attrs = attrs or []
+        filtr = DSAdmin.suffixfilt(suffix)
         try:
             entry = self.getEntry(
-                DN_MAPPING_TREE, ldap.SCOPE_ONELEVEL, filt, attrs)
+                DN_MAPPING_TREE, ldap.SCOPE_ONELEVEL, filtr, attrs)
+            return entry
         except NoSuchEntryError:
-            # TODO why not raise here?
-            print ("Cannot find suffix in mapping tree: %r " % suffix)
-            pass
+            raise NoSuchEntryError(
+                "Cannot find suffix in mapping tree: %r " % suffix)
         except ldap.FILTER_ERROR, e:
             print "Error searching for", filt
             raise e
-        return entry
 
-    def getBackendsForSuffix(self, suffix, attrs=[]):
+    def getBackendsForSuffix(self, suffix, attrs=None):
+        # TESTME removed try..except and raise if NoSuchEntryError
+        attrs = attrs or []
         nsuffix = DSAdmin.normalizeDN(suffix)
-        try:
-            entries = self.search_s("cn=plugins,cn=config", ldap.SCOPE_SUBTREE,
-                                    "(&(objectclass=nsBackendInstance)(|(nsslapd-suffix=%s)(nsslapd-suffix=%s)))" % (suffix, nsuffix),
-                                    attrs)
-        except NoSuchEntryError:
-            pass
+        entries = self.search_s("cn=plugins,cn=config", ldap.SCOPE_SUBTREE,
+                                "(&(objectclass=nsBackendInstance)(|(nsslapd-suffix=%s)(nsslapd-suffix=%s)))" % (suffix, nsuffix),
+                                attrs)
         return entries
 
-    def getSuffixForBackend(self, bename, attrs=[]):
-        """given a backend name, return the mapping tree entry for it"""
+    def getSuffixForBackend(self, bename, attrs=None):
+        """Return the mapping tree entry of `bename` or None if not found"""
+        attrs = attrs or []
         try:
             entry = self.getEntry("cn=plugins,cn=config", ldap.SCOPE_SUBTREE,
                                   "(&(objectclass=nsBackendInstance)(cn=%s))" % bename,
                                   ['nsslapd-suffix'])
-        except NoSuchEntryError:
-            print "Could not find an entry for backend", bename
-        if entry:
             suffix = entry.getValue('nsslapd-suffix')
             return self.getMTEntry(suffix, attrs)
-        return None
+        except NoSuchEntryError:
+            print "Could not find an entry for backend", bename
+            return None
 
     def findParentSuffix(self, suffix):
         """see if the given suffix has a parent suffix"""
@@ -1126,17 +1146,17 @@ class DSAdmin(SimpleLDAPObject):
             TODO: consider use logging instead of print
         """
 
-        beents = self.getBackendsForSuffix(suffix, ['cn'])
+        entries_backend = self.getBackendsForSuffix(suffix, ['cn'])
         benames = []
         # no backends for this suffix yet - create one
-        if not beents:
+        if not entries_backend:
             bename = self.setupBackend(
                 suffix, binddn, bindpw, urls, benamebase=bename)
             if not bename:
                 print "Couldn't create backend for", suffix
                 return -1  # ldap error code handled already
         else:  # use existing backend(s)
-            benames = [entry.cn for entry in beents]
+            benames = [entry.cn for entry in entries_backend]
             bename = benames.pop(0)
 
         parent = self.findParentSuffix(suffix)
@@ -1150,8 +1170,8 @@ class DSAdmin(SimpleLDAPObject):
         if bename:
             dn = ','.join("cn=monitor,cn=%s" % bename, DN_LDBM)
         else:
-            beents = self.getBackendsForSuffix(suffix)
-            dn = "cn=monitor," + beents[0].dn
+            entries_backend = self.getBackendsForSuffix(suffix)
+            dn = "cn=monitor," + entries_backend[0].dn
         dbmondn = "cn=monitor," + DN_LDBM
         dbdbdn = "cn=database,cn=monitor," + DN_LDBM
         try:
@@ -1336,9 +1356,9 @@ class DSAdmin(SimpleLDAPObject):
             the name of the attribute to index, and the types of indexes
             to create e.g. "pres", "eq", "sub"
         """
-        beents = self.getBackendsForSuffix(suffix, ['cn'])
+        entries_backend = self.getBackendsForSuffix(suffix, ['cn'])
         # assume 1 local backend
-        dn = "cn=%s,cn=index,%s" % (attr, beents[0].dn)
+        dn = "cn=%s,cn=index,%s" % (attr, entries_backend[0].dn)
         entry = Entry(dn)
         entry.setValues('objectclass', 'top', 'nsIndex')
         entry.setValues('cn', attr)
@@ -1355,15 +1375,15 @@ class DSAdmin(SimpleLDAPObject):
     def modIndex(self, suffix, attr, mod):
         """just a wrapper around a plain old ldap modify, but will
         find the correct index entry based on the suffix and attribute"""
-        beents = self.getBackendsForSuffix(suffix, ['cn'])
+        entries_backend = self.getBackendsForSuffix(suffix, ['cn'])
         # assume 1 local backend
-        dn = "cn=%s,cn=index,%s" % (attr, beents[0].dn)
+        dn = "cn=%s,cn=index,%s" % (attr, entries_backend[0].dn)
         self.modify_s(dn, mod)
 
     def requireIndex(self, suffix):
-        beents = self.getBackendsForSuffix(suffix, ['cn'])
+        entries_backend = self.getBackendsForSuffix(suffix, ['cn'])
         # assume 1 local backend
-        dn = beents[0].dn
+        dn = entries_backend[0].dn
         replace = [(ldap.MOD_REPLACE, 'nsslapd-require-index', 'on')]
         self.modify_s(dn, replace)
 
@@ -1384,18 +1404,25 @@ class DSAdmin(SimpleLDAPObject):
     def disableReplLogging(self):
         return self.setLogLevel(0)
 
+    #
+    # TODO what if setLogLevel(self, *vals, access='access') or 'error'
+    #
     def setLogLevel(self, *vals):
-        val = reduce(operator.add, vals)
-        self.modify_s(DN_CONFIG, [(ldap.MOD_REPLACE,
-                      'nsslapd-errorlog-level', str(val))])
+        """Set nsslapd-errorlog-level and return its value."""
+        val = sum(vals)  # TESTME
+        self.modify_s(DN_CONFIG, [
+            (ldap.MOD_REPLACE, 'nsslapd-errorlog-level', str(val))])
+        return val
 
     def setAccessLogLevel(self, *vals):
-        val = reduce(operator.add, vals)
+        """Set nsslapd-accesslog-level and return its value."""
+        val = sum(vals)
         self.modify_s(DN_CONFIG, [(
             ldap.MOD_REPLACE, 'nsslapd-accesslog-level', str(val))])
+        return val
 
     def setupChainingIntermediate(self):
-        confdn = "cn=config,cn=chaining database,cn=plugins,cn=config"
+        confdn = ','.join("cn=config", DN_CHAIN)
         try:
             self.modify_s(confdn, [(ldap.MOD_ADD, 'nsTransmittedControl',
                                    ['2.16.840.1.113730.3.4.12', '1.3.6.1.4.1.1466.29539.12'])])
@@ -1457,8 +1484,7 @@ class DSAdmin(SimpleLDAPObject):
 
         entry = self.getEntry(dn, ldap.SCOPE_BASE)
         if not entry:
-            print "Entry %s was added successfully, but I cannot search it" % dn
-            return -1
+            raise NoSuchEntryError("Entry %s was added successfully, but I cannot search it" % dn)
         elif self.verbose:
             print entry
         return 0
@@ -1469,10 +1495,10 @@ class DSAdmin(SimpleLDAPObject):
         dn = mtent.dn
 
         # next, get the path of the replication plugin
-        plgent = self.getEntry(
+        e_plugin = self.getEntry(
             "cn=Multimaster Replication Plugin,cn=plugins,cn=config",
             ldap.SCOPE_BASE, "(objectclass=*)", ['nsslapd-pluginPath'])
-        path = plgent.getValue('nsslapd-pluginPath')
+        path = e_plugin.getValue('nsslapd-pluginPath')
 
         mod = [(ldap.MOD_REPLACE, 'nsslapd-state', 'backend'),
                (ldap.MOD_ADD, 'nsslapd-backend', bename),
@@ -2008,9 +2034,10 @@ class DSAdmin(SimpleLDAPObject):
         # TODO should I check the addSuffix output as it doesn't raise
         self.addSuffix(repArgs['suffix'])
         if 'bename' not in repArgs:
-            beents = self.getBackendsForSuffix(repArgs['suffix'], ['cn'])
+            entries_backend = self.getBackendsForSuffix(
+                repArgs['suffix'], ['cn'])
             # just use first one
-            repArgs['bename'] = beents[0].cn
+            repArgs['bename'] = entries_backend[0].cn
         if repArgs.get('log', False):
             self.enableReplLogging()
 
@@ -2200,6 +2227,7 @@ class DSAdmin(SimpleLDAPObject):
 
     ###########################
     # Static methods start here
+    # TODO move some methods outside. This class is too big
     ###########################
     @staticmethod
     def normalizeDN(dn, usespace=False):
