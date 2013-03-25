@@ -52,18 +52,20 @@ def addbackend_harn(conn, name):
     ret = conn.addSuffix(suffix, name)
     conn.add(e)
 
+
 def setupBackend_ok_test():
     be = conn.setupBackend('o=backend1')
     assert be
-    
+
+
 def setupBackend_double_test():
     be1 = conn.setupBackend('o=backend1')
     be11 = conn.setupBackend('o=backend1')
     assert be1
     assert be11
     assert be1 == be11
-    
-    
+
+
 def addsuffix_test():
     addbackend_harn(conn, 'addressbook6')
 
@@ -149,21 +151,24 @@ def setupAgreement_test():
     conn.setupReplica(args)
     dn_replica = conn.setupAgreement(consumer, args)
     print dn_replica
-    
+
+
 def setLogLevel_test():
-    vals = 1<<0, 1<<1, 1<<5
+    vals = 1 << 0, 1 << 1, 1 << 5
     assert conn.setLogLevel(*vals) == sum(vals)
 
+
 def setLogLevel_test():
-    vals = 1<<0, 1<<1, 1<<5
+    vals = 1 << 0, 1 << 1, 1 << 5
     assert conn.setAccessLogLevel(*vals) == sum(vals)
 
-@raises(NoSuchEntryError)    
+
+@raises(NoSuchEntryError)
 def getMTEntry_missing_test():
     e = conn.getMTEntry('o=MISSING')
+
 
 def getMTEntry_present_test():
     suffix = 'o=addressbook6'
     e = conn.getMTEntry(suffix)
     assert e, "Entry should be present %s" % suffix
- 

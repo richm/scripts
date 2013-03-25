@@ -59,6 +59,7 @@ DN_LDBM = "cn=ldbm database,cn=plugins,cn=config"
 DN_MAPPING_TREE = "cn=mapping tree,cn=config"
 DN_CHAIN = "cn=chaining database,cn=plugins,cn=config"
 
+
 class Error(Exception):
     pass
 
@@ -69,6 +70,7 @@ class InvalidArgumentError(Error):
 
 class NoSuchEntryError(Error):
     pass
+
 
 class MissingEntryError(NoSuchEntryError):
     """When just added entries are missing."""
@@ -592,9 +594,9 @@ class DSAdmin(SimpleLDAPObject):
         """We just set our instance variables and wrap the methods.
             The real work is done in the following methods, reused during
             instance creation & co.
-                * __localinit__ 
+                * __localinit__
                 * __initPart2
-                
+
             e.g. when using the start command, we just need to reconnect,
              not create a new instance"""
         self.__wrapmethods()
@@ -629,7 +631,7 @@ class DSAdmin(SimpleLDAPObject):
         """Wrapper around SimpleLDAPObject.search. It is common to just get one entry.
 
             eg. getEntry(dn, scope, filter, attributes)
-            
+
             XXX This cannot return None
         """
         res = self.search(*args)
@@ -640,7 +642,7 @@ class DSAdmin(SimpleLDAPObject):
         elif isinstance(obj, Entry):
             return obj
         else:  # assume list/tuple
-            assert obj[0] is not None, "None entry!" # TEST CODE
+            assert obj[0] is not None, "None entry!"  # TEST CODE
             return obj[0]
 
     def __wrapmethods(self):
@@ -944,7 +946,7 @@ class DSAdmin(SimpleLDAPObject):
 
     def setupBackend(self, suffix, binddn=None, bindpw=None, urls=None, attrvals={}, benamebase=None, verbose=False):
         """Setup a backend and return its dn. Blank on error
-        
+
             FIXME: avoid duplicate backends
         """
         dnbase = ""
@@ -984,13 +986,13 @@ class DSAdmin(SimpleLDAPObject):
                     'cn': cn,
                     'nsslapd-suffix': nsuffix
                 })
-                
+
                 if binddn and bindpw and urls:  # its a chaining be
                     entry.update({
-                    'nsfarmserverurl': urls,
-                    'nsmultiplexorbinddn': binddn,
-                    'nsmultiplexorcredentials': bindpw
-                    })
+                                 'nsfarmserverurl': urls,
+                                 'nsmultiplexorbinddn': binddn,
+                                 'nsmultiplexorcredentials': bindpw
+                                 })
                 else:  # set ldbm parameters, if any
                     pass
                     #     $entry->add('nsslapd-cachesize' => '-1');
@@ -1011,13 +1013,14 @@ class DSAdmin(SimpleLDAPObject):
                 benum += 1
             except ldap.LDAPError, e:
                 print "Could not add backend entry " + dn, e
-                raise 
+                raise
         if verbose:
             try:
                 entry = self.getEntry(dn, ldap.SCOPE_BASE)
                 print entry
             except NoSuchEntryError:
-                raise MissingEntryError("Backend entry added, but could not be searched")
+                raise MissingEntryError(
+                    "Backend entry added, but could not be searched")
 
         return cn
 
@@ -1047,8 +1050,8 @@ class DSAdmin(SimpleLDAPObject):
                 print entry
             return rc
         except NoSuchEntryError:
-            entry = None            
-            
+            entry = None
+
         # fix me when we can actually used escaped DNs
         #dn = "cn=%s,cn=mapping tree,cn=config" % escapedn
         dn = ','.join('cn="%s"' % nsuffix, DN_MAPPING_TREE)
@@ -1090,7 +1093,8 @@ class DSAdmin(SimpleLDAPObject):
                 DN_MAPPING_TREE, ldap.SCOPE_ONELEVEL, filtr, attrs)
             return entry
         except NoSuchEntryError:
-            raise NoSuchEntryError("Cannot find suffix in mapping tree: %r " % suffix)
+            raise NoSuchEntryError(
+                "Cannot find suffix in mapping tree: %r " % suffix)
         except ldap.FILTER_ERROR, e:
             print "Error searching for", filt
             raise e
@@ -1101,7 +1105,7 @@ class DSAdmin(SimpleLDAPObject):
         nsuffix = DSAdmin.normalizeDN(suffix)
         entries = self.search_s("cn=plugins,cn=config", ldap.SCOPE_SUBTREE,
                                 "(&(objectclass=nsBackendInstance)(|(nsslapd-suffix=%s)(nsslapd-suffix=%s)))" % (suffix, nsuffix),
-                                    attrs)
+                                attrs)
         return entries
 
     def getSuffixForBackend(self, bename, attrs=None):
@@ -1116,7 +1120,6 @@ class DSAdmin(SimpleLDAPObject):
         except NoSuchEntryError:
             print "Could not find an entry for backend", bename
             return None
-
 
     def findParentSuffix(self, suffix):
         """see if the given suffix has a parent suffix"""
@@ -1405,14 +1408,14 @@ class DSAdmin(SimpleLDAPObject):
     # TODO what if setLogLevel(self, *vals, access='access') or 'error'
     #
     def setLogLevel(self, *vals):
-        """Set nsslapd-errorlog-level and return its value.""" 
-        val = sum(vals) # TESTME
+        """Set nsslapd-errorlog-level and return its value."""
+        val = sum(vals)  # TESTME
         self.modify_s(DN_CONFIG, [
-            (ldap.MOD_REPLACE,'nsslapd-errorlog-level', str(val))])
+            (ldap.MOD_REPLACE, 'nsslapd-errorlog-level', str(val))])
         return val
 
     def setAccessLogLevel(self, *vals):
-        """Set nsslapd-accesslog-level and return its value.""" 
+        """Set nsslapd-accesslog-level and return its value."""
         val = sum(vals)
         self.modify_s(DN_CONFIG, [(
             ldap.MOD_REPLACE, 'nsslapd-accesslog-level', str(val))])
@@ -1481,7 +1484,7 @@ class DSAdmin(SimpleLDAPObject):
 
         entry = self.getEntry(dn, ldap.SCOPE_BASE)
         if not entry:
-            raise NoSuchEntryError("Entry %s was added successfully, but I cannot search it" % dn)            
+            raise NoSuchEntryError("Entry %s was added successfully, but I cannot search it" % dn)
         elif self.verbose:
             print entry
         return 0
@@ -2031,7 +2034,8 @@ class DSAdmin(SimpleLDAPObject):
         # TODO should I check the addSuffix output as it doesn't raise
         self.addSuffix(repArgs['suffix'])
         if 'bename' not in repArgs:
-            entries_backend = self.getBackendsForSuffix(repArgs['suffix'], ['cn'])
+            entries_backend = self.getBackendsForSuffix(
+                repArgs['suffix'], ['cn'])
             # just use first one
             repArgs['bename'] = entries_backend[0].cn
         if repArgs.get('log', False):
