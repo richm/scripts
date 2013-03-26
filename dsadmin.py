@@ -115,14 +115,14 @@ class Entry(object):
                     self.ref = entrydata[1]  # continuation reference
                 else:
                     self.dn = entrydata[0]
-                    self.data = ldap.cidict.cidict(entrydata[1])
+                    self.data = cidict(entrydata[1])
             elif isinstance(entrydata, basestring):
                 self.dn = entrydata
-                self.data = ldap.cidict.cidict()
+                self.data = cidict()
         else:
             #
             self.dn = ''
-            self.data = ldap.cidict.cidict()
+            self.data = cidict()
 
     def __nonzero__(self):
         """This allows us to do tests like if entry: returns false if there is no data,
@@ -854,15 +854,17 @@ class DSAdmin(SimpleLDAPObject):
         return rc
 
     def createIndex(self, suffix, attr, verbose=False):
-        cn = "index" + str(int(time.time()))
+        entries_backend = self.getBackendsForSuffix(suffix, ['cn'])
+        cn = "index%d" % time.time()
         dn = "cn=%s,cn=index,cn=tasks,cn=config" % cn
         entry = Entry(dn)
-        entry.setValues('objectclass', 'top', 'extensibleObject')
-        entry.setValues('cn', cn)
-        entry.setValues('nsIndexAttribute', attr)
-        entries_backend = self.getBackendsForSuffix(suffix, ['cn'])
+        entry.update({
+            'objectclass': ['top', 'extensibleObject'],
+            'cn': cn,
+            'nsIndexAttribute': attr,
+            'nsInstance': entries_backend[0].cn
+        })
         # assume 1 local backend
-        entry.setValues('nsInstance', entries_backend[0].cn)
         rc = self.startTaskAndWait(entry, verbose)
 
         if rc:
@@ -944,11 +946,12 @@ class DSAdmin(SimpleLDAPObject):
                     "Error: mapping tree entry " + ent.dn + " has no suffix")
         return sufs
 
-    def setupBackend(self, suffix, binddn=None, bindpw=None, urls=None, attrvals={}, benamebase=None, verbose=False):
+    def setupBackend(self, suffix, binddn=None, bindpw=None, urls=None, attrvals=None, benamebase=None, verbose=False):
         """Setup a backend and return its dn. Blank on error
 
             FIXME: avoid duplicate backends
         """
+        attrvals = attrvals or {}
         dnbase = ""
         # if benamebase is set, try creating without appending
         if benamebase:
@@ -1510,7 +1513,8 @@ class DSAdmin(SimpleLDAPObject):
         except ldap.TYPE_OR_VALUE_EXISTS:
             print "chainOnUpdate already enabled for %s" % suffix
 
-    def setupConsumerChainOnUpdate(self, suffix, isIntermediate, binddn, bindpw, urls, beargs={}):
+    def setupConsumerChainOnUpdate(self, suffix, isIntermediate, binddn, bindpw, urls, beargs=None):
+        beargs = beargs or {}
         # suffix should already exist
         # we need to create a chaining backend
         if not 'nsCheckLocalACI' in beargs:
@@ -2630,12 +2634,17 @@ SchemaFile= %s
         return exitCode
 
     @staticmethod
-    def cgiPost(host, port, username, password, uri, verbose, secure, args):
-        """Post the request to the admin server.  Admin server requires authentication,
-        so we use the auth handler classes.  NOTE: the url classes in python use the
-        deprecated base64.encodestring() function, which truncates lines, causing Apache
-        to give us a 400 Bad Request error for the Authentication string.  So, we have
-        to tell base64.encodestring() not to truncate."""
+    def cgiPost(host, port, username, password, uri, verbose, secure, args=None):
+        """Post the request to the admin server. 
+        
+           Admin server requires authentication, so we use the auth handler classes.  
+            
+            NOTE: the url classes in python use the deprecated 
+            base64.encodestring() function, which truncates lines, 
+            causing Apache to give us a 400 Bad Request error for the
+            Authentication string.  So, we have to tell 
+            base64.encodestring() not to truncate."""
+        args = args or {}
         prefix = 'http'
         if secure:
             prefix = 'https'
