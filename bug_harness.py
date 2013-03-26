@@ -7,6 +7,8 @@ from dsadmin import Entry
 """
 import os
 
+REPLBINDDN = ''
+REPLBINDPW = ''
 
 class DSAdminHarness(DSAdmin):
     """Harness wrapper around dsadmin.
@@ -23,3 +25,15 @@ class DSAdminHarness(DSAdmin):
         args.setdefault('bindpw', REPLBINDPW)
 
         return DSAdmin.setupAgreement(self, repoth, args)
+        
+    def setupReplica(self, args):
+        """Set default replia credentials """
+        args.setdefault('binddn', REPLBINDDN)
+        args.setdefault('bindpw', REPLBINDPW)
+        return DSAdmin.setupReplica(self, args)
+        
+   def setupBindDN(self, binddn=REPLBINDDN, bindpw=REPLBINDPW):
+       return DSAdmin.setupBindDN(self, binddn, bindpw)
+     
+
+
