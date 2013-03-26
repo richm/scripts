@@ -36,7 +36,6 @@ from ldap.cidict import cidict
 
 from dsadmin_utils import *
 
-REPLICAID = 1  # the initial replica ID
 
 # replicatype @see https://access.redhat.com/knowledge/docs/en-US/Red_Hat_Directory_Server/8.1/html/Administration_Guide/Managing_Replication-Configuring-Replication-cmd.html
 # 2 for consumers and hubs (read-only replicas)
@@ -1131,10 +1130,10 @@ class DSAdmin(SimpleLDAPObject):
 
         while len(rdns) > 0:
             suffix = ','.join(rdns)
-            mapent = self.getMTEntry(suffix)
-            if mapent:
+            try:
+                mapent = self.getMTEntry(suffix)
                 return suffix
-            else:
+            except NoSuchEntryError:
                 del rdns[0]
 
         return ""
@@ -1554,20 +1553,6 @@ class DSAdmin(SimpleLDAPObject):
             TODO: this method does not update replica type
             DONE: replaced id and type keywords with rid and rtype
         """
-        def get_next_replicaid(replica_id, replica_type):
-            global REPLICAID  # declared here because we may assign to it
-            if replica_id:
-                REPLICAID = replica_id
-                return REPLICAID
-            # get a default replica_id if it's a MASTER,
-            # or 0 if consumer
-            if replica_type == MASTER_TYPE:
-                REPLICAID += 1
-                return REPLICAID
-            
-            return 0
-
-
         suffix = args['suffix']
         binddn = args['binddn']
         repltype = args.get('type', MASTER_TYPE)
@@ -1586,10 +1571,6 @@ class DSAdmin(SimpleLDAPObject):
         # create replica entry in mapping-tree
         nsuffix = normalizeDN(suffix)
         mtent = self.getMTEntry(suffix)
-        if not mtent:
-            raise NoSuchEntryError(
-                "Error: no such suffix in Mapping Tree: %s" % suffix)
-
         dn_replica = "cn=replica," + mtent.dn
         try:
             entry = self.getEntry(dn_replica, ldap.SCOPE_BASE)
@@ -1609,9 +1590,6 @@ class DSAdmin(SimpleLDAPObject):
         else:
             binddnlist = binddn
 
-        # eventually get a default replica id
-        # TODO: move this logic to bug_harness.py
-        replid = get_next_replicaid(replid, repltype)
 
         entry = Entry(dn_replica)
         entry.setValues(

@@ -13,6 +13,20 @@ import socket
 import ldap
 import re
 
+#
+# Decorator
+#
+def static_var(varname, value):
+    def decorate(func):
+        setattr(func, varname, value)
+        return func
+    return decorate
+
+#
+# Utilities
+#
+
+
 def normalizeDN(dn, usespace=False):
     # not great, but will do until we use a newer version of python-ldap
     # that has DN utilities
