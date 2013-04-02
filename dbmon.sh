@@ -106,6 +106,7 @@ dodbmon() {
                     print "# free - number of free bytes in dn cache"
                     print "# free% - percent free in dn cache"
                     print "# size - average size of dn in dn cache in bytes (currentdncachesize/currentdncachecount)"
+                    print "# under each db are the list of selected indexes specified with INDEXLIST"
                 }
             }
             if (havednstats) { # make sure there is enough room for dbname:ent and dbname:dn
@@ -115,6 +116,9 @@ dodbmon() {
             } else {
                 dbentext = ""
                 dbdnext = ""
+            }
+            if (maxdbnamelen < 6) { # len of "dbname"
+                maxdbnamelen = 6
             }
 
             if (verbose > 0) {
@@ -147,7 +151,7 @@ dodbmon() {
                         ipo = idxstats[dbn,idx,"pageout"]
                         # not every db will have every index
                         if (ipi != "" && ipo != "") {
-                            printf fmtstr, "index", idxnames[idx], ipi, ipo
+                            printf fmtstr, "+", idxnames[idx], ipi, ipo
                         }
                     }
                 }
