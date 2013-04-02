@@ -5,7 +5,7 @@ import pprint
 from argparse import ArgumentParser, REMAINDER
 
 year = 2013
-month = 3
+month = 4
 day = 1
 
 parser = ArgumentParser()
@@ -26,7 +26,7 @@ usecapt = True
 
 regex_num = r'[0-9]+'
 regex_ts = r'(%s):(%s):(%s).(%s)' % (regex_num, regex_num, regex_num, regex_num)
-regex_func = r'[a-zA-Z][a-zA-Z0-9_]*'
+regex_func = r'[a-zA-Z_][a-zA-Z0-9_]*'
 regex_time = r'(%s).(%s)' % (regex_num, regex_num)
 regex_syscall_comp = r'^'
 regex_syscall_beg = r'^'
