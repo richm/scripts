@@ -1,10 +1,6 @@
 #!/bin/sh
 
-DIR=${DIR:-`dirname $0`}
-if [ -z "$DIR" ] ; then
-    DIR=.
-fi
-
+DIR=${DIR:-.}
 PERFTESTCONF=${PERFTESTCONF:-$DIR/perftest.conf}
 
 if [ -f $PERFTESTCONF ] ; then
@@ -130,7 +126,11 @@ genldif() {
 }
 
 doloaddb() {
-    bzip2 -dc $DIR/$1.ldif.bz2 | $PREFIX/lib/dirsrv/slapd-$INST/ldif2db -n $1 -i -
+    if [ -f $DIR/$1.ldif ] ; then
+        cat $DIR/$1.ldif | $PREFIX/lib/dirsrv/slapd-$INST/ldif2db -n $1 -i -
+    else
+        bzip2 -dc $DIR/$1.ldif.bz2 | $PREFIX/lib/dirsrv/slapd-$INST/ldif2db -n $1 -i -
+    fi
 }
 
 loaddb() {
