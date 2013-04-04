@@ -62,16 +62,28 @@ dodbmon() {
         /^maxdncachesize/ { stats[dbname,"dnmax"]=$2 }
         /^currentdncachecount/ { stats[dbname,"dncnt"]=$2 }
         /^dbfilename-/ {
+            #rhds
             #dbfilename-3: userRoot/id2entry.db4
+            #sunds
+            #dbfilename-id2entry: /full/path/to/db/dbname/dbname_id2entry.dbX
             if (dbname in dbnames) {
                 split($0, idxline, /[ :/.-]+/)
                 idxname=tolower(idxline[4])
-                dbn = tolower(idxline[3])
+                dbn=tolower(idxline[3])
+                ilen=length(idxline)
+                sundbn=tolower(idxline[ilen-2])
+                sunidxname=tolower(idxline[2]) 
                 if ((dbn == dbname) && (allindex || (idxname in idxnames))) {
                     idxnum=idxline[2]
                     if (!(idxname in idxnames)) { idxnames[idxname] = idxname }
                     len = length(idxname)
                     if (len > idxmaxlen[dbn]) { idxmaxlen[dbn] = len }
+                } else if ((sundbn == dbname) && (allindex || (sunidxname in idxnames))) {
+                    idxname=sunidxname
+                    idxnum=1 # no index number just index name
+                    if (!(idxname in idxnames)) { idxnames[idxname] = idxname }
+                    len = length(idxname)
+                    if (len > idxmaxlen[sundbn]) { idxmaxlen[sundbn] = len }
                 } else {
                     # print "index", idxline[4], "not in idxnames"
                 }
