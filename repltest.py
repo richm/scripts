@@ -3,23 +3,32 @@ import os
 import sys
 import time
 import ldap
-from dsadmin import DSAdmin, Entry
+import logging
+from dsadmin import DSAdmin, Entry, tools
+
+logging.getLogger('dsadmin').setLevel(logging.WARN)
+logging.getLogger('dsadmin.tools').setLevel(logging.WARN)
 
 host1 = "localhost.localdomain"
 host2 = host1
 port1 = 1389
 port2 = port1 + 1000
+replid = 1
 
 m1replargs = {
 	'suffix': "dc=example,dc=com",
 	'bename': "userRoot",
 	'binddn': "cn=replrepl,cn=config",
 	'bindcn': "replrepl",
-	'bindpw': "replrepl"
+	'bindpw': "replrepl",
+        'log': True,
+        'id': replid
 }
+replid += 1
 
 #os.environ['USE_DBX'] = "1"
-m1 = DSAdmin.createAndSetupReplica({
+m1 = tools.DSAdminTools.createAndSetupReplica({
+        'prefix': os.environ.get('PREFIX', None),
 	'newrootpw': 'password',
 	'newhost': host1,
 	'newport': port1,
@@ -30,15 +39,13 @@ m1 = DSAdmin.createAndSetupReplica({
 )
 #del os.environ['USE_DBX']
 
-m2replargs = {
-	'suffix': "dc=example,dc=com",
-	'bename': "userRoot",
-	'binddn': "cn=replrepl,cn=config",
-	'bindcn': "replrepl",
-	'bindpw': "replrepl"
-}
+m2replargs = m1replargs
+m2replargs['id'] = replid
+replid += 1
+
 #os.environ['USE_DBX'] = 1
-m2 = DSAdmin.createAndSetupReplica({
+m2 = tools.DSAdminTools.createAndSetupReplica({
+        'prefix': os.environ.get('PREFIX', None),
 	'newrootpw': 'password',
 	'newhost': host2,
 	'newport': port2,
