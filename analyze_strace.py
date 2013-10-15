@@ -6,7 +6,7 @@ from argparse import ArgumentParser, REMAINDER
 
 year = 2013
 month = 4
-day = 1
+day = 4
 
 parser = ArgumentParser()
 parser.add_argument('-s', help='start time (strace format %H:%M:%S.%usec)')
@@ -25,9 +25,9 @@ usepid = True
 usecapt = True
 
 regex_num = r'[0-9]+'
-regex_ts = r'(%s):(%s):(%s).(%s)' % (regex_num, regex_num, regex_num, regex_num)
+regex_ts = r'(%s):(%s):(%s)[.](%s)' % (regex_num, regex_num, regex_num, regex_num)
 regex_func = r'[a-zA-Z_][a-zA-Z0-9_]*'
-regex_time = r'(%s).(%s)' % (regex_num, regex_num)
+regex_time = r'(%s)[.](%s)' % (regex_num, regex_num)
 regex_syscall_comp = r'^'
 regex_syscall_beg = r'^'
 regex_syscall_end = r'^'
@@ -46,8 +46,14 @@ fields = fields_beg
 regex_syscall_comp = regex_syscall_comp + r'%s\s(%s)\(.*' % (regex_ts, regex_func)
 regex_syscall_beg = regex_syscall_beg + r'%s\s(%s)\(.*unfinished.*$' % (regex_ts, regex_func)
 regex_syscall_end = regex_syscall_end + r'%s\s<... (%s) resumed>.*' % (regex_ts, regex_func)
-regex_op_comp = regex_op_comp + r'%s\ssetsockopt\(%s, SOL_TCP, TCP_CORK, \[0\], 4\) = 0' % (regex_ts, regex_num)
-regex_op_end = regex_op_end + r'%s\s<... setsockopt resumed>.*= 0' % regex_ts
+usecork = False
+if usecork:
+    regex_op_comp = regex_op_comp + r'%s\ssetsockopt\(%s, SOL_TCP, TCP_CORK, \[0\], 4\) = 0' % (regex_ts, regex_num)
+    regex_op_end = regex_op_end + r'%s\s<... setsockopt resumed>.*= 0' % regex_ts
+else: # use sendto result
+    regex_op_comp = regex_op_comp + r'%s\ssendto\(.*?"0.*?e.*?\\n\\1\\0\\4\\0\\4\\0".*' % regex_ts
+#27655 15:37:04.478503 sendto(64, "0\16\2\3\3\304\5e\7\n\1\0\4\0\4\0", 16, 0, NULL, 0) = 16 <0.000030>
+
 if usecapt:
     regex_syscall_comp = regex_syscall_comp + r'<%s>' % regex_time
     regex_syscall_end = regex_syscall_end + r'<%s>' % regex_time
@@ -121,6 +127,8 @@ for fn in args.files:
             prevmsec = rec['tsmsec']
         ft = rec['ft']
         func = rec['func']
+        if func == "poll" and ft.seconds < 1 and ft.microseconds > 5000:
+            print func, ft, ts.strftime("%X.%f")
         # add this particular syscall time
         funcstat = stats['funcs'].setdefault(func, {})
         funcstat['num'] = funcstat.get('num', 0) + 1
@@ -174,12 +182,13 @@ def optime(op, field):
                                          op['begin'].strftime("%X.%f"), op['end'].strftime("%X.%f"))
 
 print "Found", len(ops), "operations"
-print "longest duration:     ", optime(stats['opmaxop'], 'dur')
-print "shortest duration:    ", optime(stats['opminop'], 'dur')
-print "longest syscall op:   ", optime(stats['ftmaxop'], 'ft')
-print "shortest syscall op:  ", optime(stats['ftminop'], 'ft')
-print "average duration:     ", "%6.6f" % stats['opavg']
-print "average syscall time: ", "%6.6f" % stats['ftavg']
+if len(ops) > 0:
+    print "longest duration:     ", optime(stats['opmaxop'], 'dur')
+    print "shortest duration:    ", optime(stats['opminop'], 'dur')
+    print "longest syscall op:   ", optime(stats['ftmaxop'], 'ft')
+    print "shortest syscall op:  ", optime(stats['ftminop'], 'ft')
+    print "average duration:     ", "%6.6f" % stats['opavg']
+    print "average syscall time: ", "%6.6f" % stats['ftavg']
 print "Number of operations with duration longer than"
 for thr in thresholds:
     if thr in threshcounts:
@@ -192,9 +201,8 @@ sortedfuncs = sorted(stats['funcs'].iterkeys(), key=lambda x: stats['funcs'][x][
 for func in sortedfuncs:
     funcstats = stats['funcs'][func]
     print "Stats for syscall", func
-    print "min time: %d.%6.6d at %s" % (funcstats['min'].seconds, funcstats['min'].microseconds, funcstats['mints'].strftime("%X.%f"))
-    print "max time: %d.%6.6d at %s" % (funcstats['max'].seconds, funcstats['max'].microseconds, funcstats['maxts'].strftime("%X.%f"))
-    print "avg time: %6.6f " % funcstats['ftavg']
+    print "time: min: %d.%6.6d at %s | max: %d.%6.6d at %s" % (funcstats['min'].seconds, funcstats['min'].microseconds, funcstats['mints'].strftime("%X.%f"), funcstats['max'].seconds, funcstats['max'].microseconds, funcstats['maxts'].strftime("%X.%f"))
+    print "time: avg: %6.6f | count: %s" % (funcstats['ftavg'], funcstats['num'])
     avgsum = avgsum + funcstats['ftavg']
     if funcstats['min'] < ftmin:
         ftmin = funcstats['min']
