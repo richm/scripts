@@ -222,9 +222,10 @@ dosearch2() { LDCLTFLT=${LDCLTFLT:-$LDCLTFLT2} dosearch "$SUF2" ; }
 domod1() { LDCLTFLT=${LDCLTFLT:-$LDCLTFLT1} domod "$MODSUF1" ; }
 domod2() { LDCLTFLT=${LDCLTFLT:-$LDCLTFLT2} domod "$MODSUF2" ; }
 
+XLABEL=${XLABEL:-"Time"}
 gnuplotheader='
 set terminal png font "'$GPFONT'" 12 size 1700,1800
-set xlabel "Time"
+set xlabel "'"$XLABEL"'"
 set xdata time
 set timefmt "%s"
 set format x "%H:%M:%S"
@@ -233,39 +234,50 @@ set grid'
 doplot() {
     graphout=$1 ; shift
     extradat=$1 ; shift
+    DELIM=${DELIM:-" "}
+    if [ -n "$AUTOTITLE" ] ; then
+        AUTOTITLE="set key autotitle columnhead"
+    fi
+    TITLE=${TITLE:-"Ops/Second by Time"}
+    YLABEL=${YLABEL:-"ops/sec"}
     gpstr="plot"
     gpnext=""
+    ii=1
     while [ $1 ] ; do
         gpoutf=$1 ; shift
         col=$1 ; shift
-        field=$1 ; shift
+        field="$1" ; shift
+        fieldvar="field$ii"
         gpstr="${gpstr}$gpnext "'"'$gpoutf'" using 1:'$col' title "'"$field"'" with lines'
         gpnext=", "
         # get stats
         statstr="$statstr"'
 plot "'$gpoutf'" u 1:'$col'
-'$field'_min = GPVAL_DATA_Y_MIN
-'$field'_max = GPVAL_DATA_Y_MAX
-f(x) = '$field'_mean
-fit f(x) "'$gpoutf'" u 1:'$col' via '$field'_mean
-'$field'_dev = sqrt(FIT_WSSR / (FIT_NDF + 1 ))
-labelstr = labelstr . sprintf("%s: mean=%g min=%g max=%g stddev=%g\n", "'$field'", '$field'_mean, '$field'_min, '$field'_max, '$field'_dev)'
+'$fieldvar'_min = GPVAL_DATA_Y_MIN
+'$fieldvar'_max = GPVAL_DATA_Y_MAX
+f(x) = '$fieldvar'_mean
+fit f(x) "'$gpoutf'" u 1:'$col' via '$fieldvar'_mean
+'$fieldvar'_dev = sqrt(FIT_WSSR / (FIT_NDF + 1 ))
+labelstr = labelstr . sprintf("%s: mean=%g min=%g max=%g stddev=%g\n", "'"$field"'", '$fieldvar'_mean, '$fieldvar'_min, '$fieldvar'_max, '$fieldvar'_dev)'
+        ii=`expr $ii + 1`
     done
 
     # output of fit command goes to stderr - no way to turn it off :P
-    gnuplot <<EOF
+    gnuplot <<EOF 2> /dev/null
 extradat = system("cat $extradat")
 set fit logfile "/dev/null"
 set terminal unknown
 labelstr = ""
 $statstr
 $gnuplotheader
+$AUTOTITLE
+set datafile separator "$DELIM"
 set label 1 labelstr at screen 0.4,0.99
 set label 2 extradat at screen 0.01,0.99
 set key at screen 1.0,1.0
 set output "$graphout"
-set title "Ops/Second by Time"
-set ylabel "ops/sec (linear)"
+set title "$TITLE"
+set ylabel "$YLABEL (linear)"
 set multiplot
 set size 1.0,0.45
 set origin 0.0,0.45
@@ -278,7 +290,75 @@ set mytics default
 set size 1.0,0.45
 set origin 0.0,0.0
 set logscale y
-set ylabel "ops/sec (logarithmic)"
+set ylabel "$YLABEL (logarithmic)"
+replot
+unset multiplot
+EOF
+}
+
+doplotvar()
+{
+    graphout=$1 ; shift
+    extradat=$1 ; shift
+    DELIM=${DELIM:-" "}
+    AUTOTITLE="set key autotitle columnhead"
+    TITLE=${TITLE:-"Ops/Second by Time"}
+    YLABEL=${YLABEL:-"ops/sec"}
+    gpstr=""
+    ii=1
+    while [ $1 ] ; do
+        gpoutf=$1 ; shift # the data file
+        ncol=$1 ; shift # the number of columns in the datafile
+        col=2
+        gpstr="plot"
+        gpnext=""
+        while [ $col -le $ncol ] ; do
+            fieldvar="field${ii}_$col"
+            gpstr="${gpstr}$gpnext "'"'$gpoutf'" using ($1-21600):'$col' with lines'
+            gpnext=", "
+            # get stats
+            statstr="$statstr"'
+plot "'$gpoutf'" u 1:'$col'
+'$fieldvar'_min = GPVAL_DATA_Y_MIN
+'$fieldvar'_max = GPVAL_DATA_Y_MAX
+f(x) = '$fieldvar'_mean
+fit f(x) "'$gpoutf'" u 1:'$col' via '$fieldvar'_mean
+'$fieldvar'_dev = sqrt(FIT_WSSR / (FIT_NDF + 1 ))
+labelstr = labelstr . sprintf("%s: mean=%g min=%g max=%g stddev=%g\n", "'"$fieldvar"'", '$fieldvar'_mean, '$fieldvar'_min, '$fieldvar'_max, '$fieldvar'_dev)'
+            col=`expr $col + 1`
+        done
+        ii=`expr $ii + 1`
+    done
+
+    # output of fit command goes to stderr - no way to turn it off :P
+    gnuplot <<EOF 2> /dev/null
+extradat = system("cat $extradat")
+set fit logfile "/dev/null"
+set terminal unknown
+set datafile separator "$DELIM"
+labelstr = ""
+$statstr
+$gnuplotheader
+$AUTOTITLE
+set label 1 labelstr at screen 0.4,0.99
+set label 2 extradat at screen 0.01,0.99
+set key at screen 1.0,1.0
+set output "$graphout"
+set title "$TITLE"
+set ylabel "$YLABEL (linear)"
+set multiplot
+set size 1.0,0.45
+set origin 0.0,0.45
+set mytics 2
+$gpstr
+unset label 1
+unset label 2
+unset title
+set mytics default
+set size 1.0,0.45
+set origin 0.0,0.0
+set logscale y
+set ylabel "$YLABEL (logarithmic)"
 replot
 unset multiplot
 EOF
@@ -292,17 +372,68 @@ cnvtldcltoutput() {
     # throw away ldclt header and footer data
     # sum counts during same time period
     gawk -F '[|]ldclt.*Average rate.*total: *' '
-    BEGIN { sum = 0; lastone = 0; nn = 1 }
+    BEGIN { sum = 0; lastone = 0; nn = 1; sumsq=0; min=9999999999; max=0; }
     NF > 1 {
         sums[$1] += $2
         if (!lastone) { lastone = $1 }
         if (lastone != $1) {
             lastsum = sums[lastone]
             sum += lastsum
+            sumsq += lastsum * lastsum
+            if (lastsum > max) { max=lastsum }
+            if (lastsum < min) { min=lastsum }
             print lastone, lastsum, (sum/nn); delete sums[lastone]; lastone = $1 ; ++nn
         }
     }
-    END { lastsum = sums[lastone] ; print lastone, lastsum, ((lastsum+sum)/nn) }
+    END { lastsum = sums[lastone] ; sum += lastsum ; avg = sum/nn ; sumsq += lastsum * lastsum ;
+          dev = sqrt(sumsq/nn - (avg)**2) ;
+          print lastone, lastsum, avg, min, max, dev }
+'
+}
+
+cnvtoldldcltoutput() {
+    # old format doesn't timestamp each line
+    #Sampling interval  = 10 sec
+    #ldclt[18791]: Starting at Thu May  2 18:06:35 2013
+    #ldclt[18791]: Average rate:  613.50/thr  ( 490.80/sec), total:   4908
+    # throw away ldclt header and footer data
+    # sum counts during same time period
+    awk -F '[ :]+' '
+    BEGIN { sum = 0; nn = 1; sumsq=0; min=9999999999; max=0
+        x="Jan 01 Feb 02 Mar 03 Apr 04 May 05 Jun 06 Jul 07 Aug 08 Sep 09 Oct 10 Nov 11 Dec 12"
+        split(x,data)
+        for(i = 1 ; i < 25 ; i += 2) {
+            mon[data[i]]=data[i+1]
+        }
+        mints=9999999999999
+        maxts=0
+    }
+    /^Sampling interval/ {intv=$4}
+    /Starting at/ {
+        m=mon[$5]
+        origts=$4 " " $5 " " $6 " " $7 ":" $8 ":" $9 " " $10
+        ts=mktime($10 " " m " " $6 " " $7 " " $8 " " $9)
+        if (ts < mints) { mints=ts }
+        if (ts > maxts) { maxts=ts }
+    }
+    /Average rate:.*\/thr.*, total:/ {
+        sum += $NF
+        sums[ts] += $NF
+        if (ts > maxts) { maxts=ts }
+        ts += intv
+    }
+    END {
+        globalavg = sum / (maxts - mints)
+        for (ii = mints; ii <= maxts; ++ii) {
+            if (ii in sums) {
+                if (ii == maxts) {
+                    print ii, sums[ii], globalavg
+                } else {
+                    print ii, sums[ii]
+                }
+            }
+        }
+    }
 '
 }
 
@@ -457,7 +588,7 @@ cnvttopoutput() {
 #         winflags=62777, sortindx=4, maxtasks=0
 #         summclr=3, msgsclr=3, headclr=2, taskclr=3
 # top -b -p 16778 -d 1 -n 300 > top.out 2>&1
-    awk -v hroff=-10 -v secoff=-648 -v startts=$1 -v endts=$2 -v thresh=15.0 -F '[ :]*' '
+    awk -v hroff=-10 -v secoff=-648 -v startts=$1 -v endts=$2 -v thresh=5.0 -F '[ :]*' '
     BEGIN { yr = strftime("%Y", startts) ; mon = strftime("%m", startts) ; day = strftime("%d", startts) ; nn = 1 }
     /^top/ {
         origts=$3 ":" $4 ":" $5
@@ -495,6 +626,148 @@ cnvtextradata() {
     '
 }
 
+cnvtlogconvcsv() {
+#Time,time_t,Results,Search,Add,Mod,Modrdn,Moddn,Compare,Delete,Abandon,
+#     Connections,SSL Conns,Bind,Anon Bind,Unbind,NotesA,Unindexed,ElapsedTime
+# NotesA field only present in newer versions
+#17/Apr/2013:22:09:20 -0400,1366157360,297,206,0,0,0,0,0,0,0,0,0,90,0,0,0
+# convert to format more suitable for gnuplot
+# the ts field is in gm time
+    tail -n +2 | \
+    awk -F'[,]+' -v hroff=2 -v start=$1 -v end=$2 '
+    function showit() {
+        outstr=""
+        for (ii = 2; ii <= NF; ++ii) {
+            if (ii == 2) {outstr=$2}
+            else {outstr=outstr " " $ii}
+        }
+        outstr=outstr " " $1
+        print outstr
+    }
+    function sumit() {
+        $11 *= 50 # scale up abandon requests for emphasis
+        for (ii = 3; ii <= NF; ++ii) {
+            sum[$2,ii] += $ii
+        }
+        sum[$2,ii] = $1
+        if ($2 < mints) { mints = $2 }
+        if ($2 > maxts) { maxts = $2 }
+        if (ii > maxnf) { maxnf = ii }
+    }
+    BEGIN {OFS=" "; secoff=hroff*3600; found=0; mints=9999999999; maxts=0; maxnf=0}
+    {$2 += secoff; if (($2 >= start) && ($2 <= end)) {sumit(); found=1}}
+    END {if (!found) {print "Error: no records found between", start, "and", end; exit 1;}
+        for (ts = mints; ts <= maxts; ++ts) {
+            if (!sum[ts,maxnf]) {
+                # no record at this timestamp, skip it
+                continue
+            }
+            outstr=""
+            for (f = 3; f <= maxnf; ++f) {
+                val=sum[ts,f]
+                if (!val) { val="0" }
+                if (outstr) {
+                    outstr=outstr " " val
+                } else {
+                    outstr=val
+                }
+            }
+            print ts, outstr
+        }
+    }
+    '
+}
+
+cnvtlogconvextra() {
+    awk '
+    /Total Connections:/ {print}
+    /StartTLS Connections:/ {print}
+    /LDAPS Connections:/ {print}
+    /LDAPI Conections:/ {print}
+    /Peak Concurrent Connections:/ {print}
+    /Total Operations:/ {print}
+    /Total Results:/ {print}
+    /Highest FD Taken:/ {print}
+    '
+}
+
+cnvtsockstats() {
+# 1367593658
+# sockets: used 119
+# TCP: inuse 9 orphan 0 tw 0 alloc 13 mem 0
+# ...
+#
+    awk -v hroff=2 '
+    BEGIN {mints=99999999999999; maxts=0;tsoff=hroff*3600}
+    /^[0-9]/ {
+        ts=$1+tsoff
+        if (ts < mints) { mints = ts }
+        if (ts > maxts) { maxts = ts }
+    }
+    /^sockets:/ {sock[ts]+=$3}
+    /^TCP:/ {tw[ts]+=$7}
+    END {
+        for (ii = mints; ii <= maxts; ++ii) {
+            if (ii in sock) {
+                print ii, sock[ii], tw[ii]
+            }
+        }
+    }
+    '
+}
+
+cnvtpingstats() {
+#1368560951
+#PING ibm-x3950x5-01.rhts.eng.bos.redhat.com (10.16.65.79) 56(84) bytes of data.
+#64 bytes from ibm-x3950x5-01.rhts.eng.bos.redhat.com (10.16.65.79): icmp_seq=1 ttl=64 time=1.48 ms
+    awk -F '[ =]+' -v hroff=2 '
+    BEGIN {sum=0;min=9999999999;max=0;tsoff=hroff*3600;inv=1;n=0}
+    NR == 1 {ts=$1+tsoff}
+    /^PING/ {next}
+    / bytes from / {
+        sum += $11
+        if ($11 < min) { min = $11 }
+        if ($11 > max) { max = $11 }
+        print ts, $11
+        n+=1
+        ts+=1
+    }
+    END { print ts, $11, (sum/n), min, max }
+    '
+}
+
+# input file is already in awk space separated format
+# as given to doplot
+getstats() {
+    awk -v fieldspec=$1 -v doavg=$2 -v domax=$3 -v domin=$4 '
+    BEGIN {
+        split(fieldspec,fields,",")
+        for (ii in fields) {
+            min[ii] = 99999999999999999
+        }
+    }
+    {
+        for (ii in fields) {
+            f = fields[ii]
+            sum[ii] += $f
+            if ($f < min[ii]) {min[ii] = $f}
+            if ($f > max[ii]) {max[ii] = $f}
+        }
+        ++nn
+    }
+    END {
+        str=""
+        sep=""
+        for (ii in fields) {
+            if (doavg) {str=str sep (sum[ii]/nn); if (sep == "") {sep=","}}
+            if (domax) {str=str sep max[ii]; if (sep == "") {sep=","}}
+            if (domin) {str=str sep min[ii]; if (sep == "") {sep=","}}
+        }
+        print str
+    }
+    '
+}
+
 comptimedata() {
     graphout=$1 ; shift
     extra1=$1 ; shift
@@ -523,12 +796,12 @@ if (uselabel2) labelstr2 = labelstr2 . sprintf("%s: mean=%g min=%g max=%g stddev
 if (label1lines > linesperlabel) uselabel1 = 0; uselabel2 = 1
 '
     done
-    gnuplot <<EOF
+    gnuplot <<EOF 2> /dev/null
 extra1 = system("cat $extra1")
 extra2 = system("cat $extra2")
 set fit logfile "/dev/null"
 set terminal unknown
-linesperlabel = 4
+linesperlabel = 6
 graphheight = 0.40
 labelposx = 0.49
 uselabel1 = 1
@@ -914,20 +1187,26 @@ dosearches1() {
 }
 
 srch1plots() {
-    # assume data directories are the subdirs of the current dir
     str1=
     str2=
+    lastcount=0
     for dir in "$@" ; do
         if [ ! -d $dir -a ! -f $dir ] ; then
             lbl="$dir" # is a label
             continue
+        fi
+        if [ -n "$lbl" ] ; then
+            curlbl="_"${lbl}"_"
+        else
+            curlbl="_"
         fi
         if [ ! -d $dir ] ; then continue ; fi
         if [ ! -f $dir/srch.dat ] ; then
             sort -n $dir/srch.out.* | cnvtldcltoutput > $dir/srch.dat
         fi
         count=0
-        lastcount=0
+        thr=`awk '/^Number of threads/ { print $NF }' $dir/srch.out.1`
+        async=`awk '/^Async max pending/ { print $NF }' $dir/srch.out.1`
         for file in $dir/srch.out.? $dir/srch.out.?? ; do
             if [ ! -f "$file" ] ; then continue ; fi
             tmpstr=`cnvtextradata < $file | tee extra.dat | grep ^vendorVersion | cut -f2 -d' '`
@@ -941,12 +1220,19 @@ srch1plots() {
             fi
             count=`expr $count + 1`
         done
+        curlbl="${curlbl}$count"
+        if [ $thr -gt 1 ] ; then
+            curlbl="${curlbl}_t${thr}"
+        fi
+        if [ $async -gt 1 ] ; then
+            curlbl="${curlbl}_a${async}"
+        fi
         if [ $count -gt $lastcount ] ; then
-            str1="$str1 $dir/srch.dat 2 ${vendor}_${lbl}_$count"
-            str2="$str2 $dir/srch.dat 3 ${vendor}_${lbl}_$count"
+            str1="$str1 $dir/srch.dat 2 ${vendor}${curlbl}"
+            str2="$str2 $dir/srch.dat 3 ${vendor}${curlbl}"
         else
-            str1="$dir/srch.dat 2 ${vendor}_${lbl}_$count $str1"
-            str2="$dir/srch.dat 3 ${vendor}_${lbl}_$count $str2"
+            str1="$dir/srch.dat 2 ${vendor}${curlbl} $str1"
+            str2="$dir/srch.dat 3 ${vendor}${curlbl} $str2"
         fi
         lastcount=$count
     done
@@ -957,14 +1243,57 @@ srch1plots() {
     elif [ $nextras -lt 2 ] ; then
         extras="$extras /dev/null"
     fi
-    echo comptimedata graph.png $extras $str1
     comptimedata graph.png $extras $str1
     comptimedata graph-avg.png $extras $str2
+}
+
+srch1csv() {
+    csvfile=srch.csv
+    echo vendor,label,clients,threads,async,avg,min,max,stddev > $csvfile
+    for dir in "$@" ; do
+        if [ ! -d $dir -a ! -f $dir ] ; then
+            lbl="$dir" # is a label
+            continue
+        fi
+        if [ ! -d $dir ] ; then continue ; fi
+        if [ ! -f $dir/srch.dat ] ; then
+            sort -n $dir/srch.out.* | cnvtldcltoutput > $dir/srch.dat
+        fi
+        count=0
+        thr=`awk '/^Number of threads/ { print $NF }' $dir/srch.out.1`
+        async=`awk '/^Async max pending/ { print $NF }' $dir/srch.out.1`
+        for file in $dir/srch.out.? $dir/srch.out.?? ; do
+            if [ ! -f "$file" ] ; then continue ; fi
+            tmpstr=`cnvtextradata < $file | tee extra.dat | grep ^vendorVersion | cut -f2 -d' '`
+            case $tmpstr in Sun*) vendor=sun ;; 389*) vendor=rhds ;; Red*) vendor=rhds ;;
+            *) echo Error: unknown vendor $tmpstr in $file - skipping
+            esac
+            if [ -s extra.dat -a -n "$vendor" ] ; then
+                mv extra.dat extra-$vendor-$lbl.dat
+            else
+                echo skipping empty extra.dat file from $file
+            fi
+            count=`expr $count + 1`
+        done
+        awk -v vendor=$vendor -v label="${lbl:-none}" -v count=$count -v thr=$thr -v async=${async:-0} '
+        BEGIN { OFS="," }
+        END { print vendor, label, count, thr, async, $3, $4, $5, $6 }
+        ' $dir/srch.dat >> $csvfile
+    done
+    extras=`ls -1 extra*.dat|head -2`
+    nextras=`ls -1 extra*.dat|head -2|wc -l`
+    if [ $nextras -lt 1 ] ; then
+        extras="/dev/null /dev/null"
+    elif [ $nextras -lt 2 ] ; then
+        extras="$extras /dev/null"
+    fi
+    cat $extras >> $csvfile
 }
 
 for cmd in "$@" ; do
     case $cmd in
     doplot) shift ; doplot "$@" ; exit 0 ;;
+    doplotvar) shift ; doplotvar "$@" ; exit 0 ;;
     comptimedata) shift ; comptimedata "$@" ; exit 0 ;;
     run2plots) shift ; run2plots "$@" ; exit 0 ;;
     mod2plots) shift ; mod2plots "$@" ; exit 0 ;;
@@ -973,8 +1302,14 @@ for cmd in "$@" ; do
     cnvtdbmonoutput) shift ; cnvtdbmonoutput "$@" ; exit 0 ;;
     cnvtfreeoutput) shift ; cnvtfreeoutput "$@" ; exit 0 ;;
     cnvtiotopoutput) shift ; cnvtiotopoutput "$@" ; exit 0 ;;
+    cnvtlogconvcsv) shift ; cnvtlogconvcsv "$@" ; exit 0 ;;
     srchmodplots) shift ; srchmodplots "$@" ; exit 0 ;;
     srch1plots) shift ; srch1plots "$@" ; exit 0 ;;
+    srch1csv) shift ; srch1csv "$@" ; exit 0 ;;
+    cnvtoldldcltoutput) shift ; cnvtoldldcltoutput "$@" ; exit 0 ;;
+    cnvtsockstats) shift ; cnvtsockstats "$@" ; exit 0 ;;
+    cnvtpingstats) shift ; cnvtpingstats "$@" ; exit 0 ;;
+    getstats) shift ; getstats "$@" ; exit 0 ;;
     esac
     $cmd || { echo Error: $cmd returned error $! ; exit 1 ; }
 done
