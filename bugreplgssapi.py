@@ -1,11 +1,14 @@
-from bug_harness import DSAdminHarness as DSAdmin
-from dsadmin import Entry
-
-
 import os
 import sys
 import time
 import ldap
+import logging
+
+from dsadmin import DSAdmin, Entry, tools
+from dsadmin.tools import DSAdminTools
+
+logging.getLogger('dsadmin').setLevel(logging.WARN)
+logging.getLogger('dsadmin.tools').setLevel(logging.WARN)
 
 host1 = "localhost.localdomain"
 host2 = host1
@@ -47,36 +50,43 @@ hostargs = {
     'newsuffix': basedn,
     'verbose': False,
     'ConfigFile': configfile,
+    'prefix': os.environ.get('PREFIX', None),
     'no_admin': True
 }
 
+replid = 1
 m1replargs = {
     'suffix': basedn,
     'bename': "userRoot",
     'binddn': "cn=replrepl,cn=config",
     'bindcn': "replrepl",
     'bindpw': "replrepl",
+    'id': replid,
     'bindmethod': 'SASL/GSSAPI',
     'log'   : False
 }
 
 #os.environ['USE_GDB'] = "1"
-m1 = DSAdmin.createAndSetupReplica(hostargs, m1replargs)
+m1 = tools.DSAdminTools.createAndSetupReplica(hostargs, m1replargs)
 #del os.environ['USE_GDB']
 
 hostargs['newhost'] = host2
 hostargs['newport'] = port2
 hostargs['newinst'] = 'm2'
 m2replargs = m1replargs
+replid += 1
+m2replargs['id'] = replid
 
-m2 = DSAdmin.createAndSetupReplica(hostargs, m2replargs)
+m2 = tools.DSAdminTools.createAndSetupReplica(hostargs, m2replargs)
 
 hostargs['newhost'] = host3
 hostargs['newport'] = port3
 hostargs['newinst'] = 'm3'
 m3replargs = m2replargs
+replid += 1
+m3replargs['id'] = replid
 
-m3 = DSAdmin.createAndSetupReplica(hostargs, m3replargs)
+m3 = tools.DSAdminTools.createAndSetupReplica(hostargs, m3replargs)
 
 print "create agreements and init consumers"
 agmtm1tom2 = m1.setupAgreement(m2, m1replargs)
