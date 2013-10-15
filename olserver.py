@@ -178,3 +178,28 @@ def addsyncprov(conn, rootdir, db="{1}bdb"):
              ('olcOverlay', 'syncprov')]
     try: conn.add_s(dn, entry)
     except ldap.ALREADY_EXISTS: pass
+
+def main():
+    src = sys.argv[1]
+    srchostname = sys.argv[2]
+    srcport = int(sys.argv[3])
+    basedn = "dc=example,dc=com"
+    rootdn = "cn=manager," + basedn
+    rootpw = "secret"
+
+    rootdir = os.path.dirname(os.path.dirname(os.path.dirname(src)))
+
+    setupserver(rootdir, rootpw)
+    createscript(src, srcport, srchostname)
+    startserver(src, srcport, True)
+    print "wait for server to be up and listening"
+    time.sleep(1)
+    print "open conection to server"
+    srv1url = "ldap://%s:%d" % (srchostname, srcport)
+    srv1 = ldap.initialize(srv1url)
+    srv1.simple_bind_s("cn=config", rootpw)
+    addschema(srv1, rootdir, ['core', 'cosine', 'inetorgperson', 'openldap', 'nis'])
+    addbackend(srv1, rootdir, rootpw, basedn)
+
+if __name__ == '__main__':
+    main()
