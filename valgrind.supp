@@ -2093,16 +2093,6 @@
    Memory leak startup
    Memcheck:Leak
    fun:*alloc
-   fun:slapi_ch_calloc
-   fun:slapi_attr_new
-   fun:slapi_attr_dup
-   fun:slapi_entry_dup
-   fun:plugin_setup
-}
-{
-   Memory leak startup
-   Memcheck:Leak
-   fun:*alloc
    fun:PR_Calloc
    fun:PR_NewRWLock
    fun:compute_init
@@ -2254,34 +2244,6 @@
    fun:*alloc
    fun:slapi_ch_calloc
    fun:perfctrs_init
-}
-{
-   var/tmp/basic.vg.6315.6321:Memory leak: 22 bytes
-   Memcheck:Leak
-   fun:*alloc
-   fun:strdup
-   fun:slapi_ch_strdup
-   fun:slapi_attr_init_locking_optional
-   fun:slapi_attr_init
-   fun:slapi_attr_dup
-   fun:slapi_entry_dup
-   fun:plugin_setup
-   fun:load_plugin_entry
-}
-{
-   var/tmp/cluUtil.vg.10112.10118:Memory leak: 16 bytes
-   Memcheck:Leak
-   fun:*alloc
-   fun:slapi_ch_malloc
-   fun:value_new
-   fun:slapi_value_dup
-   fun:valuearray_add_valuearray_fast
-   fun:valuearray_add_valuearray
-   fun:valueset_add_valuearray
-   fun:slapi_attr_dup
-   fun:slapi_entry_dup
-   fun:plugin_setup
-   fun:load_plugin_entry
 }
 {
    Stack size too big by 1 var/tmp/startup.vg.20021.20027:Syscall param write(buf) points to uninitialised byte(s) duplicates:  0
@@ -2657,22 +2619,6 @@
    fun:add_new_agreement
 }
 {
-   pss.vg.24431.24437:Memory leak: 19 bytes
-   Memcheck:Leak
-   fun:*alloc
-   fun:slapi_ch_malloc
-   fun:slapi_value_set_berval
-   fun:value_init
-   fun:value_new
-   fun:slapi_value_dup
-   fun:valuearray_add_valuearray_fast
-   fun:valuearray_add_valuearray
-   fun:valueset_add_valuearray
-   fun:slapi_attr_dup
-   fun:slapi_entry_dup
-   fun:plugin_setup
-}
-{
    vlv.vg.17756.17762:Memory leak: 2230 bytes
    Memcheck:Leak
    fun:*alloc
@@ -2732,17 +2678,6 @@
    fun:replica_new_from_entry
 }
 {
-   pss.vg.23959.23965:Memory leak: 56 bytes
-   Memcheck:Leak
-   fun:*alloc
-   fun:PR_Malloc
-   fun:PR_NewCondVar
-   fun:PR_NewRWLock
-   fun:slapi_entry_init
-   fun:slapi_entry_dup
-   fun:plugin_setup
-}
-{
    chainonupdate.vg.14690.14696:Memory leak: 49 bytes
    Memcheck:Leak
    fun:*alloc
@@ -2779,22 +2714,6 @@
    fun:cos_dn_defs_cb
 }
 {
-   pss.vg.15013.15019:Memory leak: 14 bytes
-   Memcheck:Leak
-   fun:*alloc
-   fun:slapi_ch_malloc
-   fun:slapi_value_set_berval
-   fun:value_init
-   fun:value_new
-   fun:slapi_value_dup
-   fun:valuearray_add_valuearray_fast
-   fun:valuearray_add_valuearray
-   fun:valueset_add_valuearray
-   fun:slapi_attr_dup
-   fun:slapi_entry_dup
-   fun:plugin_setup
-}
-{
    ai-qa.vg.1279.1285:Memory leak: 14 bytes
    Memcheck:Leak
    fun:*alloc
@@ -2812,18 +2731,6 @@
    fun:strdup
    fun:slapi_ch_strdup
    fun:cb_instance_alloc
-}
-{
-   bob.vg.18113.18119:Memory leak: 8 bytes
-   Memcheck:Leak
-   fun:*alloc
-   fun:slapi_ch_malloc
-   fun:valuearray_add_valuearray_fast
-   fun:valuearray_add_valuearray
-   fun:valueset_add_valuearray
-   fun:slapi_attr_dup
-   fun:slapi_entry_dup
-   fun:plugin_setup
 }
 {
    startup.vg.15129.15135:Memory leak: 12231 bytes
@@ -3148,16 +3055,6 @@
    fun:dblayer_txn_checkpoint
 }
 {
-   var/tmp/pwdpolicy.vg.24486.24492:Memory leak: 32 bytes
-   Memcheck:Leak
-   fun:*alloc
-   fun:PR_Calloc
-   fun:PR_NewRWLock
-   fun:slapi_entry_init
-   fun:slapi_entry_dup
-   fun:plugin_setup
-}
-{
    var/tmp/acl.vg.30332.30338:Memory leak: 56 bytes
    Memcheck:Leak
    fun:*alloc
@@ -3187,16 +3084,6 @@
    fun:PR_NewCondVar
    fun:PR_NewRWLock
    fun:vlv_init
-}
-{
-   var/tmp/acl.vg.28701.28707:Memory leak: 16 bytes
-   Memcheck:Leak
-   fun:*alloc
-   fun:PR_Malloc
-   fun:PR_NewRWLock
-   fun:slapi_entry_init
-   fun:slapi_entry_dup
-   fun:plugin_setup
 }
 {
    Stack size too big by 1 var/tmp/startup.vg.24604.24610:Syscall param write(buf) points to uninitialised byte(s) duplicates:  1
@@ -3298,17 +3185,6 @@
    fun:*alloc
    fun:slapi_ch_malloc
    fun:add_internal_mapping_tree_node
-}
-{
-   var/tmp/cl5.vg.27158.27164:Memory leak: 88 bytes
-   Memcheck:Leak
-   fun:*alloc
-   fun:PR_Calloc
-   fun:PR_NewLock
-   fun:PR_NewRWLock
-   fun:slapi_entry_init
-   fun:slapi_entry_dup
-   fun:plugin_setup
 }
 {
    var/tmp/mrclone.vg.16728.16734:Memory leak: 88 bytes
@@ -3462,89 +3338,6 @@
    fun:slapd_ssl_init2
 }
 {
-   /var/tmp/slapd.vg.11122.11126:Memory leak: 3 bytes
-   Memcheck:Leak
-   fun:malloc
-   fun:slapi_ch_malloc
-   fun:slapi_entry_attr_get_charptr
-   fun:plugin_setup
-   fun:slapi_register_plugin_ext
-   fun:slapi_register_plugin
-   fun:replication_multimaster_plugin_init
-   fun:plugin_setup
-}
-{
-   /var/tmp/slapd.vg.11122.11126:Memory leak: 3 bytes
-   Memcheck:Leak
-   fun:malloc
-   fun:slapi_ch_malloc
-   fun:slapi_entry_attr_get_charptr
-   fun:plugin_setup
-   fun:slapi_register_plugin_ext
-   fun:slapi_register_plugin
-   fun:replication_legacy_plugin_init
-   fun:plugin_setup
-}
-{
-   /var/tmp/slapd.vg.11122.11126:Memory leak: 3 bytes
-   Memcheck:Leak
-   fun:malloc
-   fun:slapi_ch_malloc
-   fun:slapi_entry_attr_get_charptr
-   fun:plugin_setup
-   fun:slapi_register_plugin_ext
-   fun:slapi_register_plugin
-   fun:dna_init
-   fun:plugin_setup
-}
-{
-   /var/tmp/slapd.vg.11122.11126:Memory leak: 3 bytes
-   Memcheck:Leak
-   fun:malloc
-   fun:slapi_ch_malloc
-   fun:slapi_entry_attr_get_charptr
-   fun:plugin_setup
-   fun:slapi_register_plugin_ext
-   fun:retrocl_plugin_init
-   fun:plugin_setup
-}
-{
-   /var/tmp/slapd.vg.11122.11126:Memory leak: 3 bytes
-   Memcheck:Leak
-   fun:malloc
-   fun:slapi_ch_malloc
-   fun:slapi_entry_attr_get_charptr
-   fun:plugin_setup
-   fun:slapi_register_plugin_ext
-   fun:slapi_register_plugin
-   fun:linked_attrs_init
-   fun:plugin_setup
-}
-{
-   /var/tmp/slapd.vg.11122.11126:Memory leak: 3 bytes
-   Memcheck:Leak
-   fun:malloc
-   fun:slapi_ch_malloc
-   fun:slapi_entry_attr_get_charptr
-   fun:plugin_setup
-   fun:slapi_register_plugin_ext
-   fun:slapi_register_plugin
-   fun:cos_init
-   fun:plugin_setup
-}
-{
-   /var/tmp/slapd.vg.11122.11126:Memory leak: 3 bytes
-   Memcheck:Leak
-   fun:malloc
-   fun:slapi_ch_malloc
-   fun:slapi_entry_attr_get_charptr
-   fun:plugin_setup
-   fun:slapi_register_plugin_ext
-   fun:slapi_register_plugin
-   fun:replication_multimaster_plugin_init
-   fun:plugin_setup
-}
-{
    /var/tmp/slapd.vg.11122.11126:Memory leak: 45 bytes
    Memcheck:Leak
    fun:malloc
@@ -3561,38 +3354,6 @@
    fun:slapi_ch_strdup
    fun:config_get_ldapi_filename
    fun:main
-}
-{
-   /var/tmp/slapd.vg.11122.11126:Memory leak: 3 bytes
-   Memcheck:Leak
-   fun:malloc
-   fun:slapi_ch_malloc
-   fun:slapi_entry_attr_get_charptr
-   fun:plugin_setup
-   fun:slapi_register_plugin_ext
-   fun:slapi_register_plugin
-   fun:roles_init
-   fun:plugin_setup
-}
-{
-   /var/tmp/slapd.vg.11122.11126:Memory leak: 3 bytes
-   Memcheck:Leak
-   fun:malloc
-   fun:slapi_ch_malloc
-   fun:slapi_entry_attr_get_charptr
-   fun:plugin_setup
-}
-{
-   /var/tmp/slapd.vg.11122.11126:Memory leak: 3 bytes
-   Memcheck:Leak
-   fun:malloc
-   fun:slapi_ch_malloc
-   fun:slapi_entry_attr_get_charptr
-   fun:plugin_setup
-   fun:slapi_register_plugin_ext
-   fun:slapi_register_plugin
-   fun:roles_init
-   fun:plugin_setup
 }
 {
    var/tmp/cluSearch.vg.2301:Syscall param pwrite64(buf) points to uninitialised byte(s)
@@ -5442,4 +5203,807 @@
    fun:ruv_dup
    fun:windows_acquire_replica
    fun:windows_inc_run
+}
+{
+   <insert_a_suppression_name_here>
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:_Z19ACLEvalBuildContextP7NSErr_sP13ACLEvalHandle
+   fun:_ZL21ACL_INTEvalTestRightsP7NSErr_sP13ACLEvalHandlePPKcS5_PPcS7_S7_PiPm
+   fun:ACL_EvalTestRights
+   fun:acl__TestRights
+   fun:acl_access_allowed
+   fun:acl_read_access_allowed_on_entry
+   fun:acl_access_allowed_main
+}
+{
+   <insert_a_suppression_name_here>
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:_Z19ACLEvalBuildContextP7NSErr_sP13ACLEvalHandle
+   fun:_ZL21ACL_INTEvalTestRightsP7NSErr_sP13ACLEvalHandlePPKcS5_PPcS7_S7_PiPm
+   fun:ACL_EvalTestRights
+   fun:acl__TestRights
+   fun:acl_access_allowed
+   fun:acl_read_access_allowed_on_entry
+   fun:acl_access_allowed_main
+}
+{
+   <insert_a_suppression_name_here>
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTpool_malloc
+   fun:_ZL18ACL_PermAllocTablePvm
+   fun:PL_NewHashTable
+   fun:_Z19ACLEvalBuildContextP7NSErr_sP13ACLEvalHandle
+   fun:_ZL21ACL_INTEvalTestRightsP7NSErr_sP13ACLEvalHandlePPKcS5_PPcS7_S7_PiPm
+   fun:ACL_EvalTestRights
+   fun:acl__TestRights
+   fun:acl_access_allowed
+   fun:acl_read_access_allowed_on_entry
+   fun:acl_access_allowed_main
+}
+{
+   <insert_a_suppression_name_here>
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTpool_malloc
+   fun:_ZL18ACL_PermAllocTablePvm
+   fun:PL_NewHashTable
+   fun:_Z19ACLEvalBuildContextP7NSErr_sP13ACLEvalHandle
+   fun:_ZL21ACL_INTEvalTestRightsP7NSErr_sP13ACLEvalHandlePPKcS5_PPcS7_S7_PiPm
+   fun:ACL_EvalTestRights
+   fun:acl__TestRights
+   fun:acl_access_allowed
+   fun:acl_read_access_allowed_on_entry
+   fun:acl_access_allowed_main
+}
+{
+   <insert_a_suppression_name_here>
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:_Z19ACLEvalBuildContextP7NSErr_sP13ACLEvalHandle
+   fun:_ZL21ACL_INTEvalTestRightsP7NSErr_sP13ACLEvalHandlePPKcS5_PPcS7_S7_PiPm
+   fun:ACL_EvalTestRights
+   fun:acl__TestRights
+   fun:acl_access_allowed
+   fun:acl_read_access_allowed_on_entry
+   fun:acl_access_allowed_main
+}
+{
+   <insert_a_suppression_name_here>
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTpool_malloc
+   fun:_ZL18ACL_PermAllocEntryPvPKv
+   fun:PL_HashTableRawAdd
+   fun:_Z19ACLEvalBuildContextP7NSErr_sP13ACLEvalHandle
+   fun:_ZL21ACL_INTEvalTestRightsP7NSErr_sP13ACLEvalHandlePPKcS5_PPcS7_S7_PiPm
+   fun:ACL_EvalTestRights
+   fun:acl__TestRights
+   fun:acl_access_allowed
+   fun:acl_read_access_allowed_on_entry
+   fun:acl_access_allowed_main
+}
+{
+   Stack size too big by 5 /var/tmp/slapd.vg.18909:Memory leak: 16458 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:ACL_FLEX_ALLOC(unsigned int)
+   fun:acl_create_buffer(_IO_FILE*, int)
+   fun:aclrestart(_IO_FILE*)
+   fun:acl_InitScanner
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 9768 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:ACL_ExprNew
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 6600 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:ACL_ExprNew
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 5280 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:ACL_ExprNew
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 4752 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:ACL_AclNew
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 4405 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_strdup_perm
+   fun:ACL_ExprTerm
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 4044 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_strdup_perm
+   fun:ACL_ExprAddArg
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 3 /var/tmp/slapd.vg.18909:Memory leak: 3960 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:ACL_ListNew
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 3256 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:ACL_ExprNew
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 3253 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_strdup_perm
+   fun:ACL_AclNew
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 5 /var/tmp/slapd.vg.18909:Memory leak: 2904 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:acl_wrapper_new()
+   fun:ACL_ListAppend
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 2645 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_strdup_perm
+   fun:ACL_ExprTerm
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 2200 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:ACL_ExprNew
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 3 /var/tmp/slapd.vg.18909:Memory leak: 1936 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:ACL_ExprAddArg
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 1760 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:ACL_ExprNew
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 1634 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_strdup_perm
+   fun:ACL_ExprAddArg
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 1584 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:ACL_AclNew
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 1425 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_strdup_perm
+   fun:ACL_ExprTerm
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 3 /var/tmp/slapd.vg.18909:Memory leak: 1320 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:ACL_ListNew
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 1120 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_realloc_perm
+   fun:ACL_ExprAddArg
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 1011 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_strdup_perm
+   fun:ACL_AclNew
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 5 /var/tmp/slapd.vg.18909:Memory leak: 968 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:acl_wrapper_new()
+   fun:ACL_ListAppend
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 873 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_strdup_perm
+   fun:ACL_ExprTerm
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 3 /var/tmp/slapd.vg.18909:Memory leak: 528 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:ACL_ExprAddArg
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 520 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_realloc_perm
+   fun:ACL_ExprAddArg
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 296 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:ACL_ExprNew
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 236 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_strdup_perm
+   fun:ACL_ExprAddArg
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 200 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:ACL_ExprNew
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 160 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:ACL_ExprNew
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 144 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:ACL_AclNew
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 5 /var/tmp/slapd.vg.18909:Memory leak: 128 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:ACL_FLEX_ALLOC(unsigned int)
+   fun:acl_create_buffer(_IO_FILE*, int)
+   fun:aclrestart(_IO_FILE*)
+   fun:acl_InitScanner
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 3 /var/tmp/slapd.vg.18909:Memory leak: 120 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:ACL_ListNew
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 104 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_realloc_perm
+   fun:ACL_ExprAddArg
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 97 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_strdup_perm
+   fun:ACL_AclNew
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 2 /var/tmp/slapd.vg.18909:Memory leak: 96 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTcrit_init
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 5 /var/tmp/slapd.vg.18909:Memory leak: 88 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:acl_wrapper_new()
+   fun:ACL_ListAppend
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 87 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_strdup_perm
+   fun:ACL_ExprTerm
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   /var/tmp/slapd.vg.18909:Memory leak: 80 bytes
+   Memcheck:Leak
+   fun:malloc
+   fun:slapi_ch_malloc
+   fun:slapi_sdn_new
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 4 /var/tmp/slapd.vg.18909:Memory leak: 79 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_strdup_perm
+   fun:ACL_ExprTerm
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   /var/tmp/slapd.vg.18909:Memory leak: 40 bytes
+   Memcheck:Leak
+   fun:malloc
+   fun:slapi_ch_malloc
+   fun:slapi_sdn_new
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 5 /var/tmp/slapd.vg.2535:Memory leak: 16458 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:_ZL14ACL_FLEX_ALLOCj
+   fun:_Z17acl_create_bufferP8_IO_FILEi
+   fun:_Z10aclrestartP8_IO_FILE
+   fun:acl_InitScanner
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 5 /var/tmp/slapd.vg.2535:Memory leak: 2904 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:_ZL15acl_wrapper_newv
+   fun:ACL_ListAppend
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 5 /var/tmp/slapd.vg.2535:Memory leak: 968 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:_ZL15acl_wrapper_newv
+   fun:ACL_ListAppend
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 5 /var/tmp/slapd.vg.2535:Memory leak: 128 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:_ZL14ACL_FLEX_ALLOCj
+   fun:_Z17acl_create_bufferP8_IO_FILEi
+   fun:_Z10aclrestartP8_IO_FILE
+   fun:acl_InitScanner
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
+}
+{
+   Stack size too big by 5 /var/tmp/slapd.vg.2535:Memory leak: 88 bytes duplicates:  0
+   Memcheck:Leak
+   fun:malloc
+   fun:INTsystem_malloc_perm
+   fun:INTsystem_calloc_perm
+   fun:_ZL15acl_wrapper_newv
+   fun:ACL_ListAppend
+   fun:acl_Parse
+   fun:ACL_ParseString
+   fun:__aclp__sanity_check_acltxt
+   fun:__aclp__parse_aci
+   fun:acl_parse
+   fun:acllist_insert_aci_needsLock_ext
+   fun:acllist_insert_aci_needsLock
+   fun:__aclinit_handler
 }

@@ -10,11 +10,8 @@ DBLIST=${DBLIST:-all}
 ldbmdn="cn=ldbm database,cn=plugins,cn=config"
 VERBOSE=${VERBOSE:-0}
 
-dodbmon() {
-    while [ 1 ] ; do
-        date
-        ldapsearch -xLLL -h $HOST -p $PORT -D "$BINDDN" -w "$BINDPW" -b "$ldbmdn" '(|(cn=config)(cn=database)(cn=monitor))' \
-        | awk -v dblist="$DBLIST" -v verbose=$VERBOSE -v indexlist="$INDEXLIST" -F '[:,= ]+' '
+parseldif() {
+    awk -v dblist="$DBLIST" -v verbose=$VERBOSE -v indexlist="$INDEXLIST" -F '[:,= ]+' '
         function printary(ary) {
             for (ii in ary) { print ii, "=", ary[ii] }
         }
@@ -39,6 +36,8 @@ dodbmon() {
             havednstats=0
             maxdbnamelen=0
         }
+        /^[^ ]|^$/ {origline = $0; $0 = unwrapline; unwrapline = origline}
+        /^ / {sub(/^ /, ""); unwrapline = unwrapline $0; next}
         /^nsslapd-dbcachesize/ { dbcachesize=$2 }
         /^nsslapd-db-page-size/ { pagesize=$2 }
         /^dbcachehitratio/ { dbhitratio=$2 }
@@ -46,7 +45,7 @@ dodbmon() {
         /^dbcachepageout/ { dbcachepageout=$2 }
         /^nsslapd-db-page-ro-evict-rate/ { dbroevict=$2 }
         /^nsslapd-db-pages-in-use/ { dbpages=$2 }
-        /^dn: cn=monitor, *cn=[a-zA-Z0-9][a-zA-Z0-9_]*, *cn=ldbm database, *cn=plugins, *cn=config/ {
+        /^dn: cn=monitor, *cn=[a-zA-Z0-9][a-zA-Z0-9_\.\-]*, *cn=ldbm database, *cn=plugins, *cn=config/ {
             idxnum=-1
             idxname=""
             dbname=tolower($5)
@@ -170,9 +169,18 @@ dodbmon() {
             }
         }
         '
+}
+
+dodbmon() {
+    while [ 1 ] ; do
+        date
+        ldapsearch -xLLL -h $HOST -p $PORT -D "$BINDDN" -w "$BINDPW" -b "$ldbmdn" '(|(cn=config)(cn=database)(cn=monitor))' \
+        | parseldif
         echo ""
         sleep $INCR
     done
 }
+
+parseldif ; exit 0
 
 dodbmon

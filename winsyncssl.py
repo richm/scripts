@@ -4,9 +4,12 @@ import sys
 import time
 import ldap
 import tempfile
+import copy
 from ldap.controls import LDAPControl
 import struct
-from dsadmin import DSAdmin, Entry
+from lib389 import DirSrv, Entry, tools
+from lib389.tools import DirSrvTools
+from lib389._constants import LOG_REPLICA
 from dirsyncctrl import DirSyncCtrl
 
 if os.environ.has_key('WINSYNC_USE_DS'):
@@ -14,7 +17,8 @@ if os.environ.has_key('WINSYNC_USE_DS'):
 else:
     useds = False
     # require SSL to talk to AD
-    ldap.set_option(ldap.OPT_X_TLS_CACERTDIR, os.environ["SECDIR"])
+#    ldap.set_option(ldap.OPT_X_TLS_CACERTDIR, os.environ["SECDIR"])
+    ldap.set_option(ldap.OPT_X_TLS_CACERTFILE, os.environ["SECDIR"] + "/w2k8x8664-ca.cer")
 
 ipawinsync = False
 if 'IPAWINSYNCROOT' in os.environ:
@@ -31,7 +35,7 @@ if useds:
     realm = 'EXAMPLE.COM'
     adusersubtree = "ou=People"
 else:
-    host1 = 'vmhost'
+    host1 = 'cel5x8664.testdomain.com'
     suffix = "dc=testdomain,dc=com"
     realm = 'TESTDOMAIN.COM'
     adusersubtree = "cn=testusers"
@@ -69,11 +73,13 @@ replargs = {
     'suffix': suffix,
     'bename': "userRoot",
     'binddn': "cn=replrepl,cn=config",
-    'bindcn': "replrepl",
     'bindpw': "replrepl",
-    'winsync': True,
-    'log': False
+    'log': False,
+    'id': 1
 }
+
+agmtargs = copy.copy(replargs)
+agmtargs.update({'winsync': True})
 
 if ipawinsync:
     ipawinsyncroot = os.environ.get('IPAWINSYNCROOT', os.environ.get('PREFIX', '') + '/usr/local')
@@ -101,22 +107,23 @@ else:
     schemafile = []
     cfgfd = None
 
-os.environ['USE_GDB'] = "1"
-ds = DSAdmin.createInstance({
+#os.environ['USE_GDB'] = "1"
+ds = tools.DirSrvTools.createInstance({
 	'newrootpw': rootpw1,
 	'newhost': host1,
 	'newport': port1,
-	'newinst': 'ds',
+	'newinstance': 'ds',
 	'newsuffix': suffix,
 	'verbose': False,
-        'no_admin': True,
-        'ConfigFile': configfile,
-        'SchemaFile': schemafile
+    'no_admin': True,
+    'ConfigFile': configfile,
+    'SchemaFile': schemafile,
+    'prefix': os.environ.get('PREFIX')
 })
 if cfgfd:
     os.unlink(cfgfd.name)
 
-ds.setupSSL(secport1)
+tools.DirSrvTools.setupSSL(ds, secport1, os.environ['SECDIR'])
 
 ds.replicaSetupAll(replargs)
 
@@ -157,7 +164,11 @@ if useds:
     aduserObjClasses = ['adPerson']
 else:
     aduserObjClasses = ['top', 'person', 'organizationalperson', 'user']
-    ad = DSAdmin(host2, port2, nobind=True)
+    ad = tools.DirSrvTools.createInstance({
+        "newhost": host2, "newport": port2, "newrootdn": root2,
+        "newrootpw": rootpw2, "newinstance": "ad",
+        "newsuffix": suffix, 'no_admin': True
+    })
     # require TLS/SSL for password updates
     ad.start_tls_s()
     ad.simple_bind_s(root2, rootpw2)
@@ -361,29 +372,32 @@ for ii in xrange(6,11):
     except ldap.ALREADY_EXISTS:
         print "DS entry", ent.dn, "already exists"
 
-replargs['binddn'] = root2
-replargs['bindpw'] = rootpw2
-replargs['win_subtree'] = adusersubtree + "," + suffix
-replargs['ds_subtree'] = usersubtree + ',' + suffix
+agmtargs['binddn'] = root2
+agmtargs['bindpw'] = rootpw2
+agmtargs['win_subtree'] = adusersubtree + "," + suffix
+agmtargs['ds_subtree'] = usersubtree + ',' + suffix
 syncinterval = 30
-replargs['interval'] = str(syncinterval)
-replargs['starttls'] = True
+agmtargs['interval'] = str(syncinterval)
+agmtargs['starttls'] = True
 
-agmtdn = ds.setupAgreement(ad, replargs)
+agmtdn = ds.createAgreement(ad, agmtargs)
 
 time.sleep(5)
 
-print "repl status:", ds.getReplStatus(agmtdn)
+print "repl status:", ds.agreement.status(agmtdn)
+
+#ds.config.loglevel((LOG_REPLICA,))
+print "attach debugger now and press Enter . . ."
+sys.stdin.readline()
 
 ds.startReplication(agmtdn)
 
 time.sleep(5)
 
-print "repl status:", ds.getReplStatus(agmtdn)
-
-print "with ipa, new ds users are not added to AD - so we must add them now to AD in order for them to sync . . ."
+print "repl status:", ds.agreement.status(agmtdn)
 
 if ipawinsync:
+    print "with ipa, new ds users are not added to AD - so we must add them now to AD in order for them to sync . . ."
     for ii in xrange(6,11):
         ent = makeADUserEnt(ii)
         try: ad.add_s(ent)
