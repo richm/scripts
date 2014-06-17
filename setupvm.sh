@@ -215,6 +215,7 @@ VM_DISKFILE=${VM_DISKFILE:-$VM_IMG_DIR/$VM_NAME.qcow2}
 VM_KS=${VM_KS:-$VM_NAME.ks}
 VM_KS_BASENAME=`basename $VM_KS 2> /dev/null`
 VM_ROOTPW=${VM_ROOTPW:-password}
+VM_RNG=${VM_RNG:-"--rng /dev/random"}
 if [ -z "$VM_TZ" ] ; then
     if [ -f /etc/sysconfig/clock ] ; then
         VM_TZ=`. /etc/sysconfig/clock  ; echo $ZONE`
@@ -291,7 +292,19 @@ fi
 if $SUDOCMD test -n "$VM_DISKFILE_BACKING" -a -f "$VM_DISKFILE_BACKING" ; then
     # use the given diskfile as our backing file
     # make a new one based on the vm name
-    $SUDOCMD qemu-img create -f qcow2 -b $VM_DISKFILE_BACKING $VM_DISKFILE ${VM_DISKSIZE}G
+    # NOTE: We cannot create an image which is _smaller_ than the backing image
+    # we have to grab the current size of the backing file, and omit the disk size
+    # argument if VM_DISKSIZE is less than or equal to the backing file size
+    # strip the trailing M, G, etc.
+    bfsize=`$SUDOCMD qemu-img info $VM_DISKFILE_BACKING | awk '/virtual size/ {print gensub(/[a-zA-Z]/, "", "g", $3)}'`
+    if [ $VM_DISKSIZE -gt $bfsize ] ; then
+        sizearg=${VM_DISKSIZE}G
+    else
+        echo disk size $VM_DISKSIZE for $VM_DISKFILE is smaller than the size $bfsize of the backing file $VM_DISKFILE_BACKING
+        echo the given disk size cannot be smaller than the backing file size
+        echo new vm will use size $bfsize
+    fi
+    $SUDOCMD qemu-img create -f qcow2 -b $VM_DISKFILE_BACKING $VM_DISKFILE $sizearg
 fi
 
 if $SUDOCMD test -f "$VM_DISKFILE" ; then
@@ -322,7 +335,7 @@ fi
 
 $SUDOCMD virt-install --name $VM_NAME --ram $VM_RAM $INITRD_INJECT \
     $VM_OS_VARIANT --hvm --check-cpu --accelerate \
-    --connect=qemu:///system --noautoconsole \
+    --connect=qemu:///system --noautoconsole $VM_RNG \
     --disk path=$VM_DISKFILE,size=$VM_DISKSIZE,bus=virtio \
     $VI_EXTRAS_CD --network "$VM_NETWORK" \
     $VI_LOC $VI_EXTRA_ARGS ${VM_DEBUG:+"-d"} --force
