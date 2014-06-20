@@ -205,6 +205,15 @@ if [ -n "$VM_DEBUG" ] ; then
     set -x
 fi
 
+if $SUDOCMD virsh dominfo $VM_NAME ; then
+    echo VM $VM_NAME already exists
+    echo If you want to recreate it, do
+    echo  $SUDOCMD virsh destroy $VM_NAME
+    echo  $SUDOCMD virsh undefine $VM_NAME --remove-all-storage
+    echo and re-run this script
+    exit 0
+fi
+
 VM_IMG_DIR=${VM_IMG_DIR:-/var/lib/libvirt/images}
 VM_RAM=${VM_RAM:-2048} # RAM in kbytes
 VM_CPUS=${VM_CPUS:-2}
