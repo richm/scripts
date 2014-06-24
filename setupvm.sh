@@ -110,6 +110,9 @@ fi
 if [ -n "$VM_POST_SCRIPT_BASE" -a -x "/root/$VM_POST_SCRIPT_BASE" ] ; then
     sh -x /root/$VM_POST_SCRIPT_BASE
 fi
+
+touch $VM_WAIT_FILE
+
 set +x
 
 %end
@@ -144,7 +147,8 @@ EOF
 runcmd:
  - [hostname, $VM_FQDN]
  - [mount, -o, ro, /dev/sr0, /mnt]
- - [sh, -x, /mnt/$VM_POST_SCRIPT_BASE]
+ - sh -x /mnt/$VM_POST_SCRIPT_BASE > /var/log/$VM_POST_SCRIPT_BASE.log 2>&1
+ - [touch, $VM_WAIT_FILE]
 EOF
 }
 
@@ -235,6 +239,7 @@ fi
 # fedora zerombr takes no arguments
 VM_ZEROMBR=${VM_ZEROMBR:-"zerombr yes"}
 VM_TIMEOUT=${VM_TIMEOUT:-60}
+VM_WAIT_FILE=${VM_WAIT_FILE:-/root/installcomplete}
 
 EXTRA_FILES=""
 
@@ -343,7 +348,7 @@ else # make a kickstart
 fi
 
 $SUDOCMD virt-install --name $VM_NAME --ram $VM_RAM $INITRD_INJECT \
-    $VM_OS_VARIANT --hvm --check-cpu --accelerate \
+    $VM_OS_VARIANT --hvm --check-cpu --accelerate --vcpus $VM_CPUS \
     --connect=qemu:///system --noautoconsole $VM_RNG \
     --disk path=$VM_DISKFILE,size=$VM_DISKSIZE,bus=virtio \
     $VI_EXTRAS_CD --network "$VM_NETWORK" \
