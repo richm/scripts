@@ -181,6 +181,4 @@ dodbmon() {
     done
 }
 
-parseldif ; exit 0
-
 dodbmon
