@@ -132,9 +132,57 @@ EOF
 make_cloud_init_userdata() {
     cat <<EOF
 #cloud-config
+cloud_config_modules:
+ - mounts
+ - locale
+ - set-passwords
+ - timezone
+ - puppet
+ - chef
+ - salt-minion
+ - mcollective
+ - disable-ec2-metadata
+ - runcmd
+ - yum_add_repo
+ - package_update_upgrade_install
 password: $VM_ROOTPW
 chpasswd: {expire: False}
 ssh_pwauth: True
+EOF
+    # Add base OS yum repos
+    if [ -n "$VM_OS_BASE_REPO_LIST" ] ; then
+        echo "yum_repos:"
+        set -- $VM_OS_BASE_REPO_LIST
+        while [ -n "$1" ] ; do
+            name="$1" ; shift # $1 is now url
+            cat <<EOF
+    $name:
+        name: $name
+        baseurl: $1
+        enabled: true
+        gpgcheck: 0
+EOF
+            shift
+        done
+    fi
+    # Add additional user-defined repos
+    if [ -n "$VM_REPO_LIST" ] ; then
+        echo "yum_repos:"
+        set -- $VM_REPO_LIST
+        while [ -n "$1" ] ; do
+            name="$1" ; shift # $1 is now url
+            cat <<EOF
+    $name:
+        name: $name
+        baseurl: $1
+        enabled: true
+        gpgcheck: 0
+        cost: 100
+EOF
+            shift
+        done
+    fi
+    cat <<EOF
 package_upgrade: true
 packages:
 EOF
