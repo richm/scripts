@@ -132,9 +132,57 @@ EOF
 make_cloud_init_userdata() {
     cat <<EOF
 #cloud-config
+cloud_config_modules:
+ - mounts
+ - locale
+ - set-passwords
+ - timezone
+ - puppet
+ - chef
+ - salt-minion
+ - mcollective
+ - disable-ec2-metadata
+ - runcmd
+ - yum_add_repo
+ - package_update_upgrade_install
 password: $VM_ROOTPW
 chpasswd: {expire: False}
 ssh_pwauth: True
+EOF
+    # Add base OS yum repos
+    if [ -n "$VM_OS_BASE_REPO_LIST" ] ; then
+        echo "yum_repos:"
+        set -- $VM_OS_BASE_REPO_LIST
+        while [ -n "$1" ] ; do
+            name="$1" ; shift # $1 is now url
+            cat <<EOF
+    $name:
+        name: $name
+        baseurl: $1
+        enabled: true
+        gpgcheck: 0
+EOF
+            shift
+        done
+    fi
+    # Add additional user-defined repos
+    if [ -n "$VM_REPO_LIST" ] ; then
+        echo "yum_repos:"
+        set -- $VM_REPO_LIST
+        while [ -n "$1" ] ; do
+            name="$1" ; shift # $1 is now url
+            cat <<EOF
+    $name:
+        name: $name
+        baseurl: $1
+        enabled: true
+        gpgcheck: 0
+        cost: 100
+EOF
+            shift
+        done
+    fi
+    cat <<EOF
 package_upgrade: true
 packages:
 EOF
@@ -271,7 +319,9 @@ if [ -z "$VM_NAME" ] ; then
     exit 1
 fi
 
-VM_POST_SCRIPT_BASE=`basename $VM_POST_SCRIPT 2> /dev/null`
+if [ -n "$VM_POST_SCRIPT" ] ; then
+    VM_POST_SCRIPT_BASE=`basename $VM_POST_SCRIPT 2> /dev/null`
+fi
 
 VM_NETWORK_NAME=${VM_NETWORK_NAME:-default}
 VM_NETWORK=${VM_NETWORK:-"network=$VM_NETWORK_NAME"}
@@ -310,7 +360,7 @@ if $SUDOCMD test -n "$VM_DISKFILE_BACKING" -a -f "$VM_DISKFILE_BACKING" ; then
     # we have to grab the current size of the backing file, and omit the disk size
     # argument if VM_DISKSIZE is less than or equal to the backing file size
     # strip the trailing M, G, etc.
-    bfsize=`$SUDOCMD qemu-img info $VM_DISKFILE_BACKING | awk '/virtual size/ {print gensub(/[a-zA-Z]/, "", "g", $3)}'`
+    bfsize=`$SUDOCMD qemu-img info $VM_DISKFILE_BACKING | awk '/virtual size/ {print gensub(/\.[0-9][a-zA-Z]/, "", "g", $3)}'`
     if [ $VM_DISKSIZE -gt $bfsize ] ; then
         sizearg=${VM_DISKSIZE}G
     else
