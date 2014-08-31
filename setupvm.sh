@@ -310,7 +310,7 @@ if $SUDOCMD test -n "$VM_DISKFILE_BACKING" -a -f "$VM_DISKFILE_BACKING" ; then
     # we have to grab the current size of the backing file, and omit the disk size
     # argument if VM_DISKSIZE is less than or equal to the backing file size
     # strip the trailing M, G, etc.
-    bfsize=`$SUDOCMD qemu-img info $VM_DISKFILE_BACKING | awk '/virtual size/ {print gensub(/[a-zA-Z]/, "", "g", $3)}'`
+    bfsize=`$SUDOCMD qemu-img info $VM_DISKFILE_BACKING | awk '/virtual size/ {print gensub(/\.[0-9][a-zA-Z]/, "", "g", $3)}'`
     if [ $VM_DISKSIZE -gt $bfsize ] ; then
         sizearg=${VM_DISKSIZE}G
     else
