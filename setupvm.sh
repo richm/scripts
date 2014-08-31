@@ -271,7 +271,9 @@ if [ -z "$VM_NAME" ] ; then
     exit 1
 fi
 
-VM_POST_SCRIPT_BASE=`basename $VM_POST_SCRIPT 2> /dev/null`
+if [ -n "$VM_POST_SCRIPT" ] ; then
+    VM_POST_SCRIPT_BASE=`basename $VM_POST_SCRIPT 2> /dev/null`
+fi
 
 VM_NETWORK_NAME=${VM_NETWORK_NAME:-default}
 VM_NETWORK=${VM_NETWORK:-"network=$VM_NETWORK_NAME"}
