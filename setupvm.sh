@@ -145,6 +145,12 @@ cloud_config_modules:
  - runcmd
  - yum_add_repo
  - package_update_upgrade_install
+system_info:
+  default_user:
+    name: $VM_USER_ID
+    plain_text_password: $VM_USER_PW
+    lock_passwd: False
+    sudo: ALL=(ALL) NOPASSWD:ALL
 password: $VM_ROOTPW
 chpasswd: {expire: False}
 ssh_pwauth: True
@@ -194,8 +200,19 @@ EOF
     cat <<EOF
 runcmd:
  - [hostname, $VM_FQDN]
+EOF
+    for pkg in $VM_GROUP_PACKAGE ; do
+        echo " - yum -y groupinstall \"$VM_GROUP_PACKAGE\""
+    done
+cat <<EOF
  - [mount, -o, ro, /dev/sr0, /mnt]
+EOF
+    if [ -n "$VM_POST_SCRIPT_BASE" ] ; then
+        cat <<EOF
  - sh -x /mnt/$VM_POST_SCRIPT_BASE > /var/log/$VM_POST_SCRIPT_BASE.log 2>&1
+EOF
+    fi
+cat <<EOF
  - [touch, $VM_WAIT_FILE]
 EOF
 }
@@ -204,7 +221,7 @@ make_cdrom() {
     # just put everything on the CD
     # first need a staging area
     staging=${VM_CD_STAGE_DIR:-`mktemp -d`}
-    for file in for file in $VM_POST_SCRIPT $VM_EXTRA_FILES "$@" ; do
+    for file in $VM_POST_SCRIPT $VM_EXTRA_FILES "$@" ; do
         if [ ! -f "$file" ] ; then continue ; fi
         err=
         outfile=$staging/`basename $file .in`
@@ -237,175 +254,303 @@ wait_for_completion() {
     # the file is present, installation/setup is
     # complete - keep polling every minute until
     # the file is found or we hit the timeout
-    ii=$VM_TIMEOUT
+    ii=$2
     while [ $ii -gt 0 ] ; do
-        if $SUDOCMD virt-cat -d $VM_NAME $VM_WAIT_FILE > /dev/null 2>&1 ; then
+        if $SUDOCMD virt-cat -d $1 $3 > /dev/null 2>&1 ; then
             return 0
         fi
         ii=`expr $ii - 1`
         sleep 60
     done
-    echo Error: $VM_NAME $VM_WAIT_FILE not found after $VM_TIMEOUT minutes
+    echo Error: $1 $3 not found after $2 minutes
     return 1
 }
 
-for file in "$@" ; do
-    . $file
-done
+gen_virt_mac() {
+    echo 54:52:00`hexdump -n3 -e '/1 ":%02x"' /dev/random`
+}
 
-if [ -n "$VM_DEBUG" ] ; then
-    set -x
-fi
+has_ipaddr() {
+    # $1 is network name
+    # $2 is ip addr to look for
+    # $3 is dns or ip/dhcp
+    ip=`$SUDOCMD virsh net-dumpxml $1 | xmllint --xpath "string(/network/$3/host[@ip=\"$2\"]/@ip)" -`
+    test -n "$ip"
+}
 
-if $SUDOCMD virsh dominfo $VM_NAME ; then
-    echo VM $VM_NAME already exists
-    echo If you want to recreate it, do
-    echo  $SUDOCMD virsh destroy $VM_NAME
-    echo  $SUDOCMD virsh undefine $VM_NAME --remove-all-storage
-    echo and re-run this script
-    exit 0
-fi
-
-VM_IMG_DIR=${VM_IMG_DIR:-/var/lib/libvirt/images}
-VM_RAM=${VM_RAM:-2048} # RAM in kbytes
-VM_CPUS=${VM_CPUS:-2}
-# size in GB
-VM_DISKSIZE=${VM_DISKSIZE:-16}
-VM_NAME=${VM_NAME:-ad}
-VM_DISKFILE=${VM_DISKFILE:-$VM_IMG_DIR/$VM_NAME.qcow2}
-VM_KS=${VM_KS:-$VM_NAME.ks}
-VM_KS_BASENAME=`basename $VM_KS 2> /dev/null`
-VM_ROOTPW=${VM_ROOTPW:-password}
-VM_RNG=${VM_RNG:-"--rng /dev/random"}
-if [ -z "$VM_TZ" ] ; then
-    if [ -f /etc/sysconfig/clock ] ; then
-        VM_TZ=`. /etc/sysconfig/clock  ; echo $ZONE`
+has_hostname() {
+    # $1 is network name
+    # $2 is hostname to look for
+    # $3 is dns or ip/dhcp or etchosts
+    if [ "$3" = "dns" ] ; then
+        name=`$SUDOCMD virsh net-dumpxml $1 | xmllint --xpath "string(/network/dns/host[hostname=\"$2\"]/hostname)" -`
+    elif [ "$3" = "ip/dhcp" ] ; then
+        name=`$SUDOCMD virsh net-dumpxml $1 | xmllint --xpath "string(/network/ip/dhcp/host[@name=\"$2\"]/@name)" -`
     else
-        VM_TZ=`timedatectl status | awk '/Timezone:/ {print $2}'`
+        name=`$SUDOCMD grep -e "[ 	]$2[ 	]" -e "[ 	]$2$" /etc/hosts`
     fi
-fi
-# fedora zerombr takes no arguments
-VM_ZEROMBR=${VM_ZEROMBR:-"zerombr yes"}
-VM_TIMEOUT=${VM_TIMEOUT:-60}
-VM_WAIT_FILE=${VM_WAIT_FILE:-/root/installcomplete}
+    test -n "$name"
+}
 
-EXTRA_FILES=""
+get_next_ip() {
+    echo $1 | awk -F. '{$4 += 1;OFS=".";print}'
+}
 
-# must specify a disk image, a cdrom, or a url to install from
-if [ -z "$VM_URL" -a -z "$VM_CDROM" -a -z "$VM_DISKFILE" -a -z "$VM_DISKFILE_BACKING" ] ; then
-    echo Error: no install source or disk specified in env or $@
-    echo Must specify VM_URL \(network install\)
-    echo              VM_CDROM \(local cd iso install\)
-    echo              VM_DISKFILE/VM_DISKFILE_BACKING \(create vm from existing disk image\)
-    exit 1
-fi
+get_first_ip() {
+    $SUDOCMD virsh net-dumpxml $1 | xmllint --xpath "string(/network/ip/@address)" - 2> /dev/null
+}
 
-if [ -n "$VM_URL" ] ; then
-    # for kickstart file you cannot use an nfs url, you have to split it
-    # into --server and --dir
-    case $VM_URL in
-    nfs*) VM_INSTALL_LOC=`echo $VM_URL|sed -e 's,^nfs://\([^/]*\)/\(.*\)$,nfs --server=\1 --dir=/\2,'` ;;
-       *) VM_INSTALL_LOC="url --url $VM_URL" ;;
-    esac
-    VI_LOC="-l $VM_URL"
-elif [ -n "$VM_CDROM" ] ; then
-    VI_LOC="--cdrom $VM_CDROM"
-elif [ -n "$VM_DISKFILE" -o -n "$VM_DISKFILE_BACKING" ] ; then
-    VI_LOC="--import"
-fi
+get_available_ip() {
+    nextip=`get_first_ip $1`
+    while [ 1 ] ; do
+        nextip=`get_next_ip $nextip`
+        if has_ipaddr $1 $nextip ip/dhcp ; then
+            continue
+        fi
+        break
+    done
+    echo $nextip
+}
 
-if [ -z "$VM_NAME" ] ; then
-    echo Error: no VM_NAME specified in env or $@
-    exit 1
-fi
+get_mac_for_domname() {
+    # this sees if a dhcp mac address has been configured already for the domain
+    # in the network configuration i.e. if the network has been set up ahead of time
+    # it does not look at the domain configuration because we don't have domain
+    # configuration yet
+    $SUDOCMD virsh net-dumpxml $1 | xmllint --xpath "string(/network/ip/dhcp/host[@name=\"$2\"]/@mac)" -
+}
 
-if [ -n "$VM_POST_SCRIPT" ] ; then
-    VM_POST_SCRIPT_BASE=`basename $VM_POST_SCRIPT 2> /dev/null`
-fi
+get_ip_for_domname() {
+    # this sees if a ip address has been configured already for the domain
+    # in the network configuration i.e. if the network has been set up ahead of time
+    # it does not look at the domain configuration because we don't have domain
+    # configuration yet
+    $SUDOCMD virsh net-dumpxml $1 | xmllint --xpath "string(/network/ip/dhcp/host[@name=\"$2\"]/@ip)" -
+}
 
-VM_NETWORK_NAME=${VM_NETWORK_NAME:-default}
-VM_NETWORK=${VM_NETWORK:-"network=$VM_NETWORK_NAME"}
-if [ -z "$VM_NO_MAC" -a -z "$VM_MAC" ] ; then
-    # try to get the mac addr from virsh
-    VM_MAC=`$SUDOCMD virsh net-dumpxml $VM_NETWORK_NAME | grep "'"$VM_NAME"'"|sed "s/^.*mac='\([^']*\)'.*$/\1/"`
-    if [ -z "$VM_MAC" ] ; then
-        echo Error: your machine $VM_MAC has no mac address in virsh net-dumpxml $VM_NETWORK_NAME
-        echo Please use virsh net-edit $VM_NETWORK_NAME to specify the mac address for $VM_MAC
-        echo or set VM_MAC=mac:addr in the environment
-        exit 1
+get_domain_name() {
+    $SUDOCMD virsh net-dumpxml $1 | xmllint --xpath "string(/network/domain/@name)" -
+}
+
+set_domain_name() {
+#    domname=`get_domain_name`
+#    if [ "$domname" != "$2" ] ; then
+#        $SUDOCMD virsh net-update $1 add domain "<domain name='$2'/>" --live --config
+#    fi
+     echo $1
+}
+
+# add host to virt network dns, dhcp, and /etc/hosts on host machine
+add_host() {
+    # this is so we can auto-config network on vm using dhcp
+    if ! has_hostname "$1" "$5" ip/dhcp ; then
+        $SUDOCMD virsh net-update "$1" add ip-dhcp-host "<host mac='$2' name='$5' ip='$3'/>" --live --config
     fi
-fi
-
-if [ -n "$VM_MAC" ] ; then
-    VM_NETWORK="$VM_NETWORK,mac=$VM_MAC"
-fi
-
-if [ -z "$VM_FQDN" ] ; then
-    # try to get the ip addr from virsh
-    VM_IP=`$SUDOCMD virsh net-dumpxml $VM_NETWORK_NAME | grep "'"$VM_NAME"'"|sed "s/^.*ip='\([^']*\)'.*$/\1/"`
-    if [ -z "$VM_IP" ] ; then
-        echo Error: your machine $VM_NAME has no IP address in virsh net-dumpxml $VM_NETWORK_NAME
-        echo Please use virsh net-edit $VM_NETWORK_NAME to specify the IP address for $VM_NAME
-        echo or set VM_FQDN=full.host.domain in the environment
-        exit 1
+    # this is for dns lookups on vm
+    if ! has_hostname "$1" "$5" dns ; then
+        $SUDOCMD virsh net-update "$1" add dns-host "<host ip='$3'><hostname>$4</hostname><hostname>$5</hostname></host>" --live --config
     fi
-    VM_FQDN=`getent hosts $VM_IP|awk '{print $2}'`
-    echo using hostname $VM_FQDN for $VM_NAME with IP address $VM_IP
-fi
+    # this is for hostname resolution on host machine
+    if ! has_hostname "$1" "$5" etchosts ; then
+        echo "$3	$4 $5" | $SUDOCMD tee -a /etc/hosts
+    fi
+}
 
-if $SUDOCMD test -n "$VM_DISKFILE_BACKING" -a -f "$VM_DISKFILE_BACKING" ; then
+remove_vm() {
+    while [ -n "$1" ] ; do
+        $SUDOCMD virsh destroy $1 || echo "Error stopping vm $1"
+        $SUDOCMD virsh undefine $1 --remove-all-storage || echo "Error removing vm $1"
+        shift
+    done
+}
+
+remove_virt_network() {
+    while [ -n "$1" ] ; do
+        $SUDOCMD virsh net-destroy $1 || echo "Error stopping virtnet $1"
+        $SUDOCMD virsh net-undefine $1 || echo "Error removing virtnet $1"
+        shift
+    done
+}
+
+check_for_existence() {
+    if $SUDOCMD virsh dominfo $1 ; then
+        echo VM $1 already exists
+        echo If you want to recreate it, do
+        echo  $SUDOCMD virsh destroy $1
+        echo  $SUDOCMD virsh undefine $1 --remove-all-storage
+        echo and re-run this script
+        exit 0
+    fi
+}
+
+make_disk_image() {
     # use the given diskfile as our backing file
     # make a new one based on the vm name
     # NOTE: We cannot create an image which is _smaller_ than the backing image
     # we have to grab the current size of the backing file, and omit the disk size
     # argument if VM_DISKSIZE is less than or equal to the backing file size
     # strip the trailing M, G, etc.
-    bfsize=`$SUDOCMD qemu-img info $VM_DISKFILE_BACKING | awk '/virtual size/ {print gensub(/\.[0-9][a-zA-Z]/, "", "g", $3)}'`
-    if [ $VM_DISKSIZE -gt $bfsize ] ; then
-        sizearg=${VM_DISKSIZE}G
+    bfsize=`$SUDOCMD qemu-img info $2 | awk -F'[ .]+' '/virtual size/ {print gensub(/[a-zA-Z]/, "", "g", $3)}'`
+    if [ $3 -gt $bfsize ] ; then
+        sizearg=${3}G
     else
-        echo disk size $VM_DISKSIZE for $VM_DISKFILE is smaller than the size $bfsize of the backing file $VM_DISKFILE_BACKING
+        echo disk size $3 for $1 is smaller than the size $bfsize of the backing file $2
         echo the given disk size cannot be smaller than the backing file size
         echo new vm will use size $bfsize
     fi
-    $SUDOCMD qemu-img create -f qcow2 -b $VM_DISKFILE_BACKING $VM_DISKFILE $sizearg
-fi
+    $SUDOCMD qemu-img create -f qcow2 -b $2 $1 $sizearg
+}
 
-if $SUDOCMD test -f "$VM_DISKFILE" ; then
-    # already have a disk file, so this is not a kickstart
-    # assume cloud-init
-    make_cdrom
-    VI_LOC="--import"
-else # make a kickstart
-    tmpks=
-    if [ ! -f "$VM_KS" ] ; then
-        VM_KS=`mktemp`
-        make_kickstart > $VM_KS
-        VM_KS_BASENAME=`basename $VM_KS`
-        tmpks=1
-    else
-        echo Using kickstart file $VM_KS
+get_config() {
+    for file in "$@" ; do
+        . $file
+    done
+    VM_IMG_DIR=${VM_IMG_DIR:-/var/lib/libvirt/images}
+    VM_RAM=${VM_RAM:-2048} # RAM in kbytes
+    VM_CPUS=${VM_CPUS:-2}
+    # size in GB
+    VM_DISKSIZE=${VM_DISKSIZE:-16}
+    VM_NAME=${VM_NAME:-ad}
+    VM_DISKFILE=${VM_DISKFILE:-$VM_IMG_DIR/$VM_NAME.qcow2}
+    VM_KS=${VM_KS:-$VM_NAME.ks}
+    VM_KS_BASENAME=`basename $VM_KS 2> /dev/null`
+    VM_ROOTPW=${VM_ROOTPW:-password}
+    VM_RNG=${VM_RNG:-"--rng /dev/random"}
+    if [ -z "$VM_TZ" ] ; then
+        if [ -f /etc/sysconfig/clock ] ; then
+            VM_TZ=`. /etc/sysconfig/clock  ; echo $ZONE`
+        else
+            VM_TZ=`timedatectl status | awk '/Timezone:/ {print $2}'`
+        fi
     fi
-    INITRD_INJECT="--initrd-inject=$VM_KS"
-    for file in $VM_POST_SCRIPT $VM_EXTRA_FILES ; do
-        INITRD_INJECT="$INITRD_INJECT --initrd-inject=$file"
-    done
+    # fedora zerombr takes no arguments
+    VM_ZEROMBR=${VM_ZEROMBR:-"zerombr yes"}
+    VM_TIMEOUT=${VM_TIMEOUT:-60}
+    VM_WAIT_FILE=${VM_WAIT_FILE:-/root/installcomplete}
+    if [ -n "$VM_POST_SCRIPT" ] ; then
+        VM_POST_SCRIPT_BASE=`basename $VM_POST_SCRIPT 2> /dev/null`
+    fi
 
-    for file in $VM_EXTRA_FILES ; do
-        EXTRA_FILES_BASE="$EXTRA_FILES_BASE "`basename $file 2> /dev/null`
-    done
-    VI_EXTRA_ARGS="-x ks=file:/$VM_KS_BASENAME"
+    VM_NETWORK_NAME=${VM_NETWORK_NAME:-default}
+    VM_NETWORK=${VM_NETWORK:-"network=$VM_NETWORK_NAME"}
+    VM_DOMAIN=${VM_DOMAIN:-`get_domain_name "$VM_NETWORK_NAME"`}
+    VM_DOMAIN=${VM_DOMAIN:-"test"}
+    VM_FQDN=${VM_FQDN:-$VM_NAME.$VM_DOMAIN}
+    VM_IP=${VM_IP:-`get_ip_for_domname "$VM_NETWORK_NAME" "$VM_NAME"`}
+    VM_IP=${VM_IP:-`get_available_ip $VM_NETWORK_NAME`}
+}
+
+create_vm() {
+(
+    get_config "$@"
+    check_for_existence $VM_NAME
+    # must specify a disk image, a cdrom, or a url to install from
+    if [ -z "$VM_PXE" -a -z "$VM_URL" -a -z "$VM_CDROM" -a -z "$VM_DISKFILE" -a -z "$VM_DISKFILE_BACKING" ] ; then
+        echo Error: no install source or disk specified in env or $@
+        echo Must specify VM_URL \(network install\)
+        echo              VM_CDROM \(local cd iso install\)
+        echo              VM_DISKFILE/VM_DISKFILE_BACKING \(create vm from existing disk image\)
+        echo              VM_PXE \(boot vm from PXE\)
+        exit 1
+    fi
+
+    if [ -n "$VM_URL" ] ; then
+        # for kickstart file you cannot use an nfs url, you have to split it
+        # into --server and --dir
+        case $VM_URL in
+            nfs*) VM_INSTALL_LOC=`echo $VM_URL|sed -e 's,^nfs://\([^/]*\)/\(.*\)$,nfs --server=\1 --dir=/\2,'` ;;
+            *) VM_INSTALL_LOC="url --url $VM_URL" ;;
+        esac
+        VI_LOC="-l $VM_URL"
+    elif [ -n "$VM_CDROM" ] ; then
+        VI_LOC="--cdrom $VM_CDROM"
+    elif [ -n "$VM_DISKFILE" -o -n "$VM_DISKFILE_BACKING" ] ; then
+        VI_LOC="--import"
+    elif [ -n "$VM_PXE" ] ; then
+        VI_LOC="--pxe"
+    fi
+
+    if [ -z "$VM_NAME" ] ; then
+        echo Error: no VM_NAME specified in env or $@
+        exit 1
+    fi
+
+    if [ -z "$VM_NO_MAC" -a -z "$VM_MAC" ] ; then
+        # try to get the mac addr from virsh
+        VM_MAC=`get_mac_for_domname "$VM_NETWORK_NAME" "$VM_NAME"`
+        if [ -z "$VM_MAC" ] ; then
+            VM_MAC=`gen_virt_mac`
+        fi
+    fi
+
+    if [ -n "$VM_MAC" ] ; then
+        case "$VM_NETWORK" in
+            *mac=$VM_MAC*) echo mac=$VM_MAC already in $VM_NETWORK ;;
+            *) VM_NETWORK="$VM_NETWORK,mac=$VM_MAC" ;;
+        esac
+    fi
+
+    if [ -z "$VM_NO_MAC" ] ; then
+        set_domain_name "$VM_DOMAIN"
+        add_host "$VM_NETWORK_NAME" "$VM_MAC" "$VM_IP" "$VM_FQDN" "$VM_NAME"
+    fi
+
+    if $SUDOCMD test -n "$VM_DISKFILE_BACKING" -a -f "$VM_DISKFILE_BACKING" ; then
+        make_disk_image "$VM_DISKFILE" "$VM_DISKFILE_BACKING" "$VM_DISKSIZE"
+    fi
+
+    if $SUDOCMD test -f "$VM_DISKFILE" ; then
+        # already have a disk file, so this is not a kickstart
+        # assume cloud-init
+        make_cdrom
+        VI_LOC="--import"
+        DISKARG="--disk path=$VM_DISKFILE,size=$VM_DISKSIZE,bus=virtio"
+    elif [ -n "$VM_PXE" ] ; then
+        DISKARG="--disk size=$VM_DISKSIZE"
+    else # make a kickstart
+        tmpks=
+        if [ ! -f "$VM_KS" ] ; then
+            VM_KS=`mktemp`
+            make_kickstart > $VM_KS
+            VM_KS_BASENAME=`basename $VM_KS`
+            tmpks=1
+        else
+            echo Using kickstart file $VM_KS
+        fi
+        INITRD_INJECT="--initrd-inject=$VM_KS"
+        for file in $VM_POST_SCRIPT $VM_EXTRA_FILES ; do
+            INITRD_INJECT="$INITRD_INJECT --initrd-inject=$file"
+        done
+
+        for file in $VM_EXTRA_FILES ; do
+            EXTRA_FILES_BASE="$EXTRA_FILES_BASE "`basename $file 2> /dev/null`
+        done
+        VI_EXTRA_ARGS="-x ks=file:/$VM_KS_BASENAME"
+        DISKARG="--disk path=$VM_DISKFILE,size=$VM_DISKSIZE,bus=virtio"
+    fi
+
+    $SUDOCMD virt-install --name $VM_NAME --ram $VM_RAM $INITRD_INJECT \
+        $VM_OS_VARIANT --hvm --check-cpu --accelerate --vcpus $VM_CPUS \
+        --connect=qemu:///system --noautoconsole $VM_RNG \
+        $DISKARG \
+        $VI_EXTRAS_CD --network $VM_NETWORK \
+        $VI_LOC $VI_EXTRA_ARGS ${VM_DEBUG:+"-d"} --force
+
+    wait_for_completion $VM_NAME $VM_TIMEOUT $VM_WAIT_FILE
+
+    if [ -n "$tmpks" ] ; then
+        rm -f $VM_KS
+    fi
+)
+}
+
+# MAIN
+
+if [ -n "$VM_DEBUG" ] ; then
+    set -x
 fi
 
-$SUDOCMD virt-install --name $VM_NAME --ram $VM_RAM $INITRD_INJECT \
-    $VM_OS_VARIANT --hvm --check-cpu --accelerate --vcpus $VM_CPUS \
-    --connect=qemu:///system --noautoconsole $VM_RNG \
-    --disk path=$VM_DISKFILE,size=$VM_DISKSIZE,bus=virtio \
-    $VI_EXTRAS_CD --network "$VM_NETWORK" \
-    $VI_LOC $VI_EXTRA_ARGS ${VM_DEBUG:+"-d"} --force
-
-wait_for_completion $VM_NAME $VM_TIMEOUT $VM_WAIT_FILE
-
-if [ -n "$tmpks" ] ; then
-    rm -f $VM_KS
-fi
+case "$0" in
+    *setupvm.sh) create_vm "$@" ;;
+    *) : ;; # sourced - do nothing
+esac
