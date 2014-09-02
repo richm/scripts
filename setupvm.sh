@@ -145,13 +145,25 @@ cloud_config_modules:
  - runcmd
  - yum_add_repo
  - package_update_upgrade_install
+EOF
+    # If a user and password were specified,
+    # set them as the default user.
+    if [ -n "$VM_USER_ID" -a -n "$VM_USER_PW" ] ; then
+        cat <<EOF
 system_info:
   default_user:
     name: $VM_USER_ID
-    plain_text_password: $VM_USER_PW
+    plain_text_passwd: $VM_USER_PW
     lock_passwd: False
     sudo: ALL=(ALL) NOPASSWD:ALL
-password: $VM_ROOTPW
+EOF
+    fi
+    # If a user wasn't specified, just modify
+    # the password for the normal default user.
+    if [ ! -n "$VM_USER_ID" ]; then
+        echo "password: $VM_ROOTPW"
+    fi
+    cat <<EOF
 chpasswd: {expire: False}
 ssh_pwauth: True
 EOF
