@@ -541,12 +541,23 @@ create_vm() {
         DISKARG="--disk path=$VM_DISKFILE,size=$VM_DISKSIZE,bus=virtio"
     fi
 
+    # See if a secondary network was requested.
+    if [ -n "$VM_NETWORK_NAME_2" ] ; then
+        NETWORK_2_ARG="--network network=$VM_NETWORK_NAME_2"
+    fi
+
+    # See if a tertiary network was requested.
+    if [ -n "$VM_NETWORK_NAME_3" ] ; then
+        NETWORK_3_ARG="--network network=$VM_NETWORK_NAME_3"
+    fi
+
     $SUDOCMD virt-install --name $VM_NAME --ram $VM_RAM $INITRD_INJECT \
         $VM_OS_VARIANT --hvm --check-cpu --accelerate --vcpus $VM_CPUS \
         --connect=qemu:///system --noautoconsole $VM_RNG \
         $DISKARG \
         $VI_EXTRAS_CD --network $VM_NETWORK \
-        $VI_LOC $VI_EXTRA_ARGS ${VM_DEBUG:+"-d"} --force
+        $NETWORK_2_ARG $NETWORK_3_ARG $VI_LOC \
+        $VI_EXTRA_ARGS ${VM_DEBUG:+"-d"} --force
 
     wait_for_completion $VM_NAME $VM_TIMEOUT $VM_WAIT_FILE
 
