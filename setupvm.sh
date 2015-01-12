@@ -166,7 +166,19 @@ EOF
     cat <<EOF
 chpasswd: {expire: False}
 ssh_pwauth: True
+timezone: $VM_TZ
 EOF
+    if [ -n "$VM_SSH_KEY" ]; then
+        cat <<EOF
+ssh_authorized_keys:
+    - `cat $VM_SSH_KEY`
+write_files:
+-   path: /etc/sudoers.d/999-vagrant-cloud-init-requiretty
+    permissions: 440
+    content: |
+        Defaults:$VM_USER_ID !requiretty
+EOF
+    fi
     # Add base OS yum repos
     if [ -n "$VM_OS_BASE_REPO_LIST" ] ; then
         echo "yum_repos:"
@@ -259,6 +271,9 @@ make_cdrom() {
 }
 
 wait_for_completion() {
+    if [ "$VM_PXE" = 1 ] ; then
+        return 0 # no file system == no wait file
+    fi
     # $VM_NAME $VM_TIMEOUT $VM_WAIT_FILE
     # wait up to VM_TIMEOUT minutes for VM_NAME to be
     # done with installation - this method uses
