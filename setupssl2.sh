@@ -286,17 +286,11 @@ fi
 ldapmodify -x -h localhost -p $ldapport -D "cn=directory manager" -w "$dmpwd" <<EOF
 dn: cn=encryption,cn=config
 changetype: modify
-replace: nsSSL3
-nsSSL3: on
--
 replace: nsSSLClientAuth
 nsSSLClientAuth: allowed
 -
 add: nsSSL3Ciphers
-nsSSL3Ciphers: -rsa_null_md5,+rsa_rc4_128_md5,+rsa_rc4_40_md5,+rsa_rc2_40_md5,
- +rsa_des_sha,+rsa_fips_des_sha,+rsa_3des_sha,+rsa_fips_3des_sha,+fortezza,
- +fortezza_rc4_128_sha,+fortezza_null,+tls_rsa_export1024_with_rc4_56_sha,
- +tls_rsa_export1024_with_des_cbc_sha
+nsSSL3Ciphers: +all
 
 dn: cn=config
 changetype: modify
