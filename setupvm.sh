@@ -158,6 +158,13 @@ system_info:
     sudo: ALL=(ALL) NOPASSWD:ALL
 EOF
     fi
+    # Add SSH authorized key
+    if [ -n "$VM_SSH_KEY" ] ; then
+        cat <<EOF
+    ssh_authorized_keys:
+      - ssh-rsa $VM_SSH_KEY
+EOF
+    fi
     # If a user wasn't specified, just modify
     # the password for the normal default user.
     if [ ! -n "$VM_USER_ID" ]; then
