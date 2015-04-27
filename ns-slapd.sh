@@ -65,13 +65,14 @@ if [ "$USE_VALGRIND" -o "$USE_CALLGRIND" -o "$USE_DRD" -o "$USE_HELGRIND" ]; the
 fi
 
 if [ $USE_GDB ]; then
+    XT_FN=lucidasanstypewriter-14
 #	DISPLAY=:1 ; export DISPLAY
 	case "$1" in
 	db2index|suffix2instance|db2archive|archive2db|db2ldif|ldif2db)
-	xterm -bg white -fn 10x20 -sb -sl 2000 -title gdb -e gdb --args $SLAPD "$@"
+	xterm -bg white -fn $XT_FN -sb -sl 2000 -title gdb -e gdb --args $SLAPD "$@"
 	;;
 	*)
-	(xterm -bg white -fn 10x20 -sb -sl 2000 -title gdb -e gdb --args $SLAPD -d 0 "$@") &
+	(xterm -bg white -fn $XT_FN -sb -sl 2000 -title gdb -e gdb --args $SLAPD -d 0 "$@") &
 	;;
 	esac
 elif [ $USE_VALGRIND ]; then
