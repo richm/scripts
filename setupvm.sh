@@ -178,7 +178,7 @@ EOF
     if [ -n "$VM_SSH_KEY" ]; then
         cat <<EOF
 ssh_authorized_keys:
-    - `cat $VM_SSH_KEY`
+    - $VM_SSH_KEY
 write_files:
 -   path: /etc/sudoers.d/999-vagrant-cloud-init-requiretty
     permissions: 440
@@ -187,8 +187,10 @@ write_files:
 EOF
     fi
     # Add base OS yum repos
-    if [ -n "$VM_OS_BASE_REPO_LIST" ] ; then
+    if [ -n "$VM_OS_BASE_REPO_LIST" -o -n "$VM_REPO_LIST" -o -n "$VM_YAML_REPOS" ] ; then
         echo "yum_repos:"
+    fi
+    if [ -n "$VM_OS_BASE_REPO_LIST" ] ; then
         set -- $VM_OS_BASE_REPO_LIST
         while [ -n "$1" ] ; do
             name="$1" ; shift # $1 is now url
@@ -204,7 +206,6 @@ EOF
     fi
     # Add additional user-defined repos
     if [ -n "$VM_REPO_LIST" ] ; then
-        echo "yum_repos:"
         set -- $VM_REPO_LIST
         while [ -n "$1" ] ; do
             name="$1" ; shift # $1 is now url
@@ -218,6 +219,9 @@ EOF
 EOF
             shift
         done
+    fi
+    if [ -n "$VM_YAML_REPOS" ] ; then
+        cat $VM_YAML_REPOS
     fi
     cat <<EOF
 package_upgrade: true
