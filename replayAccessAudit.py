@@ -654,13 +654,13 @@ def parseAccess(f, startoff, endoff):
 if __name__ == '__main__':
     from argparse import ArgumentParser
     parser = ArgumentParser()
-    parser.add_argument('-c', '--access', nargs='+', type=file, help='access log files - will be parsed in the order given')
-    parser.add_argument('-u', '--audit', nargs='+', type=file, help='audit log files - will be parsed in the order given')
-    parser.add_argument('-b', '--accessbegin', type=int, help='beginning access log line', default=0)
-    parser.add_argument('-e', '--accessend', type=int, help='ending access log line', default=sys.maxint)
-    parser.add_argument('-s', '--auditstart', type=int, help='starting audit log record number', default=0)
-    parser.add_argument('-f', '--auditfinish', type=int, help='ending audit log record number', default=sys.maxint)
-    parser.add_argument('-v', action='count', help='repeat for more verbosity', default=0)
+    parser.add_argument('-c', '--access', nargs='+', type=file, help='access log files - will be parsed in the order given', dest='c', default=[])
+    parser.add_argument('-u', '--audit', nargs='+', type=file, help='audit log files - will be parsed in the order given', dest='u', default=[])
+    parser.add_argument('-b', '--accessbegin', type=int, help='beginning access log line', default=0, dest='b')
+    parser.add_argument('-e', '--accessend', type=int, help='ending access log line', default=sys.maxint, dest='e')
+    parser.add_argument('-s', '--auditstart', type=int, help='starting audit log record number', default=0, dest='s')
+    parser.add_argument('-f', '--auditfinish', type=int, help='ending audit log record number', default=sys.maxint, dest='f')
+    parser.add_argument('-v', action='count', help='repeat for more verbosity', default=0, dest='v')
     args = parser.parse_args()
 
     if len(args.c) == 0 and len(args.u) == 0:
