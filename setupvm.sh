@@ -179,13 +179,15 @@ EOF
         cat <<EOF
 ssh_authorized_keys:
     - $VM_SSH_KEY
+EOF
+    fi
+    cat <<EOF
 write_files:
 -   path: /etc/sudoers.d/999-vagrant-cloud-init-requiretty
     permissions: 440
     content: |
-        Defaults:$VM_USER_ID !requiretty
+        Defaults !requiretty
 EOF
-    fi
     # Add base OS yum repos
     if [ -n "$VM_OS_BASE_REPO_LIST" -o -n "$VM_REPO_LIST" -o -n "$VM_YAML_REPOS" ] ; then
         echo "yum_repos:"
@@ -378,11 +380,25 @@ set_domain_name() {
      echo $1
 }
 
+# $1 - file
+# $2 - network name
+# $3 - ip addr
+# $4 - cidr prefix e.g. 24
+# $5 - net address e.g. 192.168.122.0
+# $6 - gateway address e.g. 192.168.122.1
+add_host_static_ip() {
+    sed -e "/<source network=['\"]$2['\"]\/>/ a\
+      <ip address='$3' prefix='$4'/>\n<route family='ipv4' address='$5' prefix='$4' gateway='$6'/>
+" -i $1
+}
+
 # add host to virt network dns, dhcp, and /etc/hosts on host machine
 add_host() {
     # this is so we can auto-config network on vm using dhcp
-    if ! has_hostname "$1" "$5" ip/dhcp ; then
-        $SUDOCMD virsh net-update "$1" add ip-dhcp-host "<host mac='$2' name='$5' ip='$3'/>" --live --config
+    if [ -z "$VM_NODHCP" ] ; then
+        if ! has_hostname "$1" "$5" ip/dhcp ; then
+            $SUDOCMD virsh net-update "$1" add ip-dhcp-host "<host mac='$2' name='$5' ip='$3'/>" --live --config
+        fi
     fi
     # this is for dns lookups on vm
     if ! has_hostname "$1" "$5" dns ; then
@@ -458,7 +474,7 @@ get_config() {
         if [ -f /etc/sysconfig/clock ] ; then
             VM_TZ=`. /etc/sysconfig/clock  ; echo $ZONE`
         else
-            VM_TZ=`timedatectl status | awk '/Timezone:/ {print $2}'`
+            VM_TZ=`timedatectl status | awk '/Timezone:/ {print $2}; /Time zone:/ {print $3}'`
         fi
     fi
     # fedora zerombr takes no arguments
@@ -577,13 +593,36 @@ create_vm() {
         NETWORK_3_ARG="--network network=$VM_NETWORK_NAME_3"
     fi
 
+    if [ -n "$VM_CPUARG" ] ; then
+        CPUARG="--cpu $VM_CPUARG"
+    fi
+
+    domxml=`mktemp`
     $SUDOCMD virt-install --name $VM_NAME --ram $VM_RAM $INITRD_INJECT \
         $VM_OS_VARIANT --hvm --check-cpu --accelerate --vcpus $VM_CPUS \
         --connect=qemu:///system --noautoconsole $VM_RNG \
-        $DISKARG \
+        $DISKARG $CPUARG \
         $VI_EXTRAS_CD --network $VM_NETWORK \
         $NETWORK_2_ARG $NETWORK_3_ARG $VI_LOC \
-        $VI_EXTRA_ARGS ${VM_DEBUG:+"-d"} --force
+        $VI_EXTRA_ARGS ${VM_DEBUG:+"-d"} --force --print-xml > $domxml
+    if [ -n "$VM_NODHCP" ] ; then
+        add_host_static_ip $domxml $VM_NETWORK_NAME $VM_IP $VM_NETWORK_PREFIX $VM_NETWORK_ADDR $VM_NETWORK_GW
+    fi
+    if [ -n "$VM_DEBUG" ] ; then
+        cat $domxml
+    fi
+    $SUDOCMD virsh define $domxml
+    rm -f $domxml
+    $SUDOCMD virsh start $VM_NAME
+
+    if [ -n "$VM_DISPLAY" ] ; then
+        display=`$SUDOCMD virsh domdisplay $VM_NAME`
+        if [ -n "$display" ] ; then
+            remote-viewer "$display" &
+        else
+            echo ERROR: could not display $VM_NAME
+        fi
+    fi
 
     wait_for_completion $VM_NAME $VM_TIMEOUT $VM_WAIT_FILE
 
