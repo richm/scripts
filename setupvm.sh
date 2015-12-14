@@ -180,7 +180,7 @@ EOF
 ssh_authorized_keys:
     - ssh-rsa $VM_SSH_KEY
 EOF
-        if [ -n "$DISABLE_ROOT" ] ; then
+        if [ -n "$VM_DISABLE_ROOT_SSH" ] ; then
             echo "disable_root: true"
         else
             echo "disable_root: false"
