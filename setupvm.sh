@@ -178,8 +178,13 @@ EOF
     if [ -n "$VM_SSH_KEY" ]; then
         cat <<EOF
 ssh_authorized_keys:
-    - $VM_SSH_KEY
+    - ssh-rsa $VM_SSH_KEY
 EOF
+        if [ -n "$DISABLE_ROOT" ] ; then
+            echo "disable_root: true"
+        else
+            echo "disable_root: false"
+        fi
     fi
     cat <<EOF
 write_files:
