@@ -9,8 +9,8 @@ set -o errexit
 #ORIGIN_CONTAINER="sudo docker exec origin"
 
 wait_for_builds_complete() {
-    waittime=600 # seconds - 10 minutes
-    interval=10
+    waittime=1200 # seconds - 20 minutes
+    interval=30
     complete=0
     while [ $waittime -gt 0 -a $complete = 0 ] ; do
         # all lines must have $4 == "Complete"
@@ -29,6 +29,8 @@ wait_for_builds_complete() {
 }
 
 #USE_LOGGING_DEPLOYER=${USE_LOGGING_DEPLOYER:-1}
+
+#USE_LOGGING_DEPLOYER_SCRIPT=${USE_LOGGING_DEPLOYER_SCRIPT:-1}
 
 #DISABLE_LIBVIRT=${DISABLE_LIBVIRT:-1}
 
@@ -93,14 +95,17 @@ else
     sudo chcon -R -t svirt_sandbox_file_t $OS_VOL_DIR
 fi
 
-pushd $OS_O_A_L_DIR/hack
-bash -x ./build-images.sh
-popd
+#PRE_BUILD_IMAGES=1
+if [ -n "$PRE_BUILD_IMAGES" ] ; then
+    pushd $OS_O_A_L_DIR/hack
+    bash -x ./build-images.sh
+    popd
 
-pushd $OS_O_A_L_DIR/hack/ssl
-bash -x ./generateExampleKeys.sh
-chmod +x createSecrets.sh
-popd
+    pushd $OS_O_A_L_DIR/hack/ssl
+    bash -x ./generateExampleKeys.sh
+    chmod +x createSecrets.sh
+    popd
+fi
 
 if [ -n "$ORIGIN_CONTAINER" ] ; then
     myid=`id -u`
@@ -149,7 +154,7 @@ fi
 $ORIGIN_CONTAINER oadm registry --create --credentials=$OS_VOL_DIR_BASE/openshift.local.config/master/openshift-registry.kubeconfig
 
 echo waiting for docker registry . . .
-ii=180
+ii=300
 while [ $ii -gt 0 ] ; do
     if $ORIGIN_CONTAINER oc describe service docker-registry --config=$OS_VOL_DIR_BASE/openshift.local.config/master/admin.kubeconfig | grep '^Endpoints:.*:5000' ; then
         echo docker registry is running
@@ -178,11 +183,15 @@ EOF
     $ORIGIN_CONTAINER oc policy add-role-to-user edit \
          system:serviceaccount:logging:logging-deployer
     if [ -n "$USE_LOGGING_DEPLOYER" ] ; then
-        imageprefix="openshift/origin-"
+        imageprefix="docker.io/openshift/origin-"
+    elif [ -n "$USE_LOGGING_DEPLOYER_SCRIPT" ] ; then
+        pushd $os_o_a_l_container_dir/deployment
+        IMAGE_PREFIX="openshift/origin-" PROJECT=logging ./run.sh
+        popd
     else
         $ORIGIN_CONTAINER oc process \
              -f $os_o_a_l_container_dir/hack/templates/dev-builds.yaml \
-             -v LOGGING_FORK_URL=https://github.com/richm/origin-aggregated-logging,LOGGING_FORK_BRANCH=rich-dev-stuff \
+             -v LOGGING_FORK_URL=https://github.com/richm/origin-aggregated-logging,LOGGING_FORK_BRANCH=curator \
             | sudo tee $OS_VOL_DIR/dev-builds.json
         $ORIGIN_CONTAINER oc create -f $OS_VOL_DIR/dev-builds.json
         sleep 60
@@ -199,18 +208,20 @@ EOF
         sudo tee -a $OS_VOL_DIR/add-privileged-logging-user.yml
     $ORIGIN_CONTAINER oc replace -f $OS_VOL_DIR/add-privileged-logging-user.yml
     $ORIGIN_CONTAINER oadm policy add-cluster-role-to-user cluster-reader \
-         system:serviceaccount:logging:aggregated-logging-fluentd
-    $ORIGIN_CONTAINER oc process \
-         -f $os_o_a_l_container_dir/deployment/deployer.yaml \
-         -v IMAGE_PREFIX=$imageprefix,KIBANA_HOSTNAME=kibana.example.com,ES_CLUSTER_SIZE=1,PUBLIC_MASTER_URL=https://172.30.0.1:8443${masterurlhack} \
-        | sudo tee $OS_VOL_DIR/logging-deployer.json
-    logging_pod=`$ORIGIN_CONTAINER oc create -f $OS_VOL_DIR/logging-deployer.json -o name`
-    echo logging pod is $logging_pod
-    echo Waiting for logging to start
-    sleep 30
-    $ORIGIN_CONTAINER oc get pods --all-namespaces
-    $ORIGIN_CONTAINER oc describe $logging_pod
-    $ORIGIN_CONTAINER oc logs $logging_pod
+                      system:serviceaccount:logging:aggregated-logging-fluentd
+    if [ ! -n "$USE_LOGGING_DEPLOYER_SCRIPT" ] ; then
+        $ORIGIN_CONTAINER oc process \
+                          -f $os_o_a_l_container_dir/deployment/deployer.yaml \
+                          -v IMAGE_PREFIX=$imageprefix,KIBANA_HOSTNAME=kibana.example.com,ES_CLUSTER_SIZE=1,PUBLIC_MASTER_URL=https://172.30.0.1:8443${masterurlhack} \
+            | sudo tee $OS_VOL_DIR/logging-deployer.json
+        logging_pod=`$ORIGIN_CONTAINER oc create -f $OS_VOL_DIR/logging-deployer.json -o name`
+        echo logging pod is $logging_pod
+        echo Waiting for logging to start
+        sleep 30
+        $ORIGIN_CONTAINER oc get pods --all-namespaces
+        $ORIGIN_CONTAINER oc describe $logging_pod
+        $ORIGIN_CONTAINER oc logs $logging_pod
+    fi
     $ORIGIN_CONTAINER oc process logging-support-template | \
         sudo tee $OS_VOL_DIR/logging-support-template.json
     $ORIGIN_CONTAINER oc create -f $OS_VOL_DIR/logging-support-template.json || echo ignore already exists errors
@@ -251,24 +262,36 @@ $ORIGIN_CONTAINER oc logs build/ruby-sample-build-1 || echo logs returned error 
 
 echo waiting for service to deploy . . .
 $ORIGIN_CONTAINER oc describe svc frontend
-ii=300
+ii=1200
 while [ $ii -gt 0 ] ; do
     endpoint=`$ORIGIN_CONTAINER oc describe svc frontend | tr -d '\r' | awk -F'[ ,]+' '/^Endpoints:/ {print $2}'`
     if [ -n "$endpoint" ] && wget -O - http://$endpoint ; then
         echo "Success"
         break
     fi
-    sleep 10
-    ii=`expr $ii - 10`
+    sleep 30
+    ii=`expr $ii - 30`
 done
 
 echo test elasticsearch
+oc login -u 'system:admin'
+oc project logging
 # we are looking for the one that looks like this:
 #23cab3e2002f        openshift/origin-pod:v1.1                                                                                                  "/pod"                   3 hours ago         Up 3 hours                                   k8s_POD.e0320077_logging-kibana-1-um5jz_logging_378d8b4b-b4ab-11e5-848d-54ee75107317_86c82ee7
-poduuid=`sudo docker ps | awk '/kibana/ && $2 ~ /^openshift\/origin-pod:/ {print gensub(/^.*_([a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12})_.*$/, "\\\1", 1)}'`
-esip=`dig @localhost logging-es.logging.svc.cluster.local +noall +answer | awk '/^;/ || /^$/ {next}; {print $NF}'`
-cert=/var/lib/origin/openshift.local.volumes/pods/$poduuid/volumes/kubernetes.io~secret/kibana/cert
-key=/var/lib/origin/openshift.local.volumes/pods/$poduuid/volumes/kubernetes.io~secret/kibana/key
+# poduuid=`sudo docker ps | awk '/kibana/ && $2 ~ /^openshift\/origin-pod:/ {print gensub(/^.*_([a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12})_.*$/, "\\\1", 1)}'`
+# esip=`dig @localhost logging-es.logging.svc.cluster.local +noall +answer | awk '/^;/ || /^$/ {next}; {print $NF}'`
+# cert=/var/lib/origin/openshift.local.volumes/pods/$poduuid/volumes/kubernetes.io~secret/kibana/cert
+# key=/var/lib/origin/openshift.local.volumes/pods/$poduuid/volumes/kubernetes.io~secret/kibana/key
+oc get secret logging-kibana --template='{{.data.ca}}' | base64 -d > ca
+ca=./ca
+oc get secret logging-kibana --template='{{.data.key}}' | base64 -d > key
+key=./key
+oc get secret logging-kibana --template='{{.data.cert}}' | base64 -d > cert
+cert=./cert
+esip=localhost
+espod=`oc get pods | awk '/^logging-es-/ {print $1}'`
+oc port-forward $espod 9200:9200 > port-forward.log 2>&1 &
+sleep 5
 sudo curl -s -k --cert $cert --key $key https://$esip:9200/_cluster/health | python -mjson.tool
 sudo curl -s -k --cert $cert --key $key https://$esip:9200/logging*/_search | python -mjson.tool
 sudo curl -s -k --cert $cert --key $key https://$esip:9200/.search*/_search | python -mjson.tool
