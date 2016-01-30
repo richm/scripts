@@ -32,14 +32,18 @@ wait_for_builds_complete() {
 
 #USE_LOGGING_DEPLOYER_SCRIPT=${USE_LOGGING_DEPLOYER_SCRIPT:-1}
 
-#DISABLE_LIBVIRT=${DISABLE_LIBVIRT:-1}
+DISABLE_LIBVIRT=${DISABLE_LIBVIRT:-1}
 
 OS_O_A_L_DIR=${OS_O_A_L_DIR:-$HOME/origin-aggregated-logging}
 if [ ! -d "$OS_O_A_L_DIR" ] ; then
     OS_O_A_L_DIR=/share/origin-aggregated-logging
 fi
 
-bash <(curl https://raw.githubusercontent.com/openshift/origin/master/examples/sample-app/pullimages.sh)
+if [ -f /share/origin/examples/sample-app/pullimages.sh ] ; then
+    bash -x /share/origin/examples/sample-app/pullimages.sh
+else
+    bash <(curl https://raw.githubusercontent.com/openshift/origin/master/examples/sample-app/pullimages.sh)
+fi
 
 myhost=`hostname`
 myip=`getent ahostsv4 $myhost|awk "/ STREAM $myhost/ { print \\$1 }"`
@@ -191,7 +195,7 @@ EOF
     else
         $ORIGIN_CONTAINER oc process \
              -f $os_o_a_l_container_dir/hack/templates/dev-builds.yaml \
-             -v LOGGING_FORK_URL=https://github.com/richm/origin-aggregated-logging,LOGGING_FORK_BRANCH=curator \
+             -v LOGGING_FORK_URL=https://github.com/richm/origin-aggregated-logging,LOGGING_FORK_BRANCH=ewolinetz_curator_and_more \
             | sudo tee $OS_VOL_DIR/dev-builds.json
         $ORIGIN_CONTAINER oc create -f $OS_VOL_DIR/dev-builds.json
         sleep 60
@@ -212,7 +216,7 @@ EOF
     if [ ! -n "$USE_LOGGING_DEPLOYER_SCRIPT" ] ; then
         $ORIGIN_CONTAINER oc process \
                           -f $os_o_a_l_container_dir/deployment/deployer.yaml \
-                          -v IMAGE_PREFIX=$imageprefix,KIBANA_HOSTNAME=kibana.example.com,ES_CLUSTER_SIZE=1,PUBLIC_MASTER_URL=https://172.30.0.1:8443${masterurlhack} \
+                          -v IMAGE_PREFIX=$imageprefix,KIBANA_HOSTNAME=kibana.example.com,ES_CLUSTER_SIZE=1,PUBLIC_MASTER_URL=https://localhost:8443${masterurlhack} \
             | sudo tee $OS_VOL_DIR/logging-deployer.json
         logging_pod=`$ORIGIN_CONTAINER oc create -f $OS_VOL_DIR/logging-deployer.json -o name`
         echo logging pod is $logging_pod
