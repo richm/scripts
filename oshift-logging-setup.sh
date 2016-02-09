@@ -34,9 +34,25 @@ wait_for_builds_complete() {
 
 DISABLE_LIBVIRT=${DISABLE_LIBVIRT:-1}
 
+if [ -z "$GITHUB_REPO" -o -z "$GITHUB_BRANCH" ] ; then
+    echo Error: you must set env. GITHUB_REPO and GITHUB_BRANCH e.g.
+    echo   \$ GITHUB_REPO=my_github_username GITHUB_BRANCH=my_devel_branch bash -x $0 2\>\&1 \| tee output
+    exit 1
+fi
+#GITHUB_REPO=${GITHUB_REPO:-openshift}
+#GITHUB_BRANCH=${GITHUB_BRANCH:-master}
+
 OS_O_A_L_DIR=${OS_O_A_L_DIR:-$HOME/origin-aggregated-logging}
 if [ ! -d "$OS_O_A_L_DIR" ] ; then
     OS_O_A_L_DIR=/share/origin-aggregated-logging
+fi
+
+if [ ! -d "$OS_O_A_L_DIR" ] ; then
+    OS_O_A_L_DIR=`mktemp -d`
+    mkdir -p $OS_O_A_L_DIR/hack/templates
+    mkdir -p $OS_O_A_L_DIR/deployment
+    curl https://raw.githubusercontent.com/$GITHUB_REPO/origin-aggregated-logging/$GITHUB_BRANCH/hack/templates/dev-builds.yaml > $OS_O_A_L_DIR/hack/templates/dev-builds.yaml
+    curl https://raw.githubusercontent.com/$GITHUB_REPO/origin-aggregated-logging/$GITHUB_BRANCH/deployment/deployer.yaml > $OS_O_A_L_DIR/deployment/deployer.yaml
 fi
 
 if [ -f /share/origin/examples/sample-app/pullimages.sh ] ; then
@@ -195,7 +211,7 @@ EOF
     else
         $ORIGIN_CONTAINER oc process \
              -f $os_o_a_l_container_dir/hack/templates/dev-builds.yaml \
-             -v LOGGING_FORK_URL=https://github.com/richm/origin-aggregated-logging,LOGGING_FORK_BRANCH=ewolinetz_curator_and_more \
+             -v LOGGING_FORK_URL=https://github.com/$GITHUB_REPO/origin-aggregated-logging,LOGGING_FORK_BRANCH=$GITHUB_BRANCH \
             | sudo tee $OS_VOL_DIR/dev-builds.json
         $ORIGIN_CONTAINER oc create -f $OS_VOL_DIR/dev-builds.json
         sleep 60
@@ -206,6 +222,8 @@ EOF
         imageprefix=`$ORIGIN_CONTAINER oc get is | awk '$1 == "logging-deployment" {print gensub(/^([^/]*\/logging\/).*$/, "\\\1", 1, $2)}'`
     fi
     #    $ORIGIN_CONTAINER oc edit scc/privileged
+    # give fluentd permission to run privileged - it needs access to /var/log/messages and
+    # /var/log/containers/* on the host
     $ORIGIN_CONTAINER oc get scc/privileged -o yaml | \
         sudo tee $OS_VOL_DIR/add-privileged-logging-user.yml
     echo "- system:serviceaccount:logging:aggregated-logging-fluentd" | \
