@@ -8,6 +8,8 @@ set -o errexit
 
 #ORIGIN_CONTAINER="sudo docker exec origin"
 
+unset CURL_CA_BUNDLE
+
 wait_for_builds_complete() {
     waittime=1200 # seconds - 20 minutes
     interval=30
@@ -61,13 +63,15 @@ else
     bash <(curl https://raw.githubusercontent.com/openshift/origin/master/examples/sample-app/pullimages.sh)
 fi
 
-myhost=`hostname`
-myip=`getent ahostsv4 $myhost|awk "/ STREAM $myhost/ { print \\$1 }"`
-revhost=`getent hosts $myip|awk '{print $2}'`
+if [ -n "$CHECK_HOSTNAME" ] ; then
+    myhost=`hostname`
+    myip=`getent ahostsv4 $myhost|awk "/ STREAM $myhost/ { print \\$1 }"`
+    revhost=`getent hosts $myip|awk '{print $2}'`
 
-if [ "$myhost" != "$revhost" ] ; then
-    echo Error: hostname is $myhost but $myip resolves to $revhost
-    exit 1
+    if [ "$myhost" != "$revhost" ] ; then
+        echo Error: hostname is $myhost but $myip resolves to $revhost
+        exit 1
+    fi
 fi
 
 # openshift skydns component conflicts with libvirt dnsmasq
