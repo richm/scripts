@@ -6,6 +6,14 @@
 
 set -o errexit
 
+if [ -n "$DEBUG" ] ; then
+    logfile=/var/log/`basename $0`.log
+    exec > $logfile 2>&1
+    set -x
+fi
+
+HOME=${HOME:-/root}
+
 #ORIGIN_CONTAINER="sudo docker exec origin"
 
 unset CURL_CA_BUNDLE
@@ -30,11 +38,37 @@ wait_for_builds_complete() {
     fi
 }
 
+start_openshift() {
+    pushd $OS_VOL_DIR_BASE
+    sudo rm -rf openshift.local.*
+    oshiftcmd=`which openshift`
+    nohup sudo $oshiftcmd start 2>&1 | sudo tee /var/log/openshift.log > /dev/null &
+    sleep 20
+    popd
+}
+
+check_openshift() {
+    if ! pgrep -f "openshift start" > /dev/null 2>&1 ; then
+        start_openshift
+    fi
+}
+
+# see if we can use sudo
+if ! sudo ls ; then
+    # assume root here - otherwise, fail
+    if ! test -f /etc/sudoers.d/999-cloud-init-requiretty ; then
+        cat > /etc/sudoers.d/999-cloud-init-requiretty <<EOF
+Defaults !requiretty
+EOF
+        chmod 0440 /etc/sudoers.d/999-cloud-init-requiretty
+    fi
+fi
+
 #USE_LOGGING_DEPLOYER=${USE_LOGGING_DEPLOYER:-1}
 
 #USE_LOGGING_DEPLOYER_SCRIPT=${USE_LOGGING_DEPLOYER_SCRIPT:-1}
 
-DISABLE_LIBVIRT=${DISABLE_LIBVIRT:-1}
+#DISABLE_LIBVIRT=${DISABLE_LIBVIRT:-1}
 
 if [ -z "$GITHUB_REPO" -o -z "$GITHUB_BRANCH" ] ; then
     echo Error: you must set env. GITHUB_REPO and GITHUB_BRANCH e.g.
@@ -44,34 +78,18 @@ fi
 #GITHUB_REPO=${GITHUB_REPO:-openshift}
 #GITHUB_BRANCH=${GITHUB_BRANCH:-master}
 
-OS_O_A_L_DIR=${OS_O_A_L_DIR:-$HOME/origin-aggregated-logging}
-if [ ! -d "$OS_O_A_L_DIR" ] ; then
-    OS_O_A_L_DIR=/share/origin-aggregated-logging
-fi
-
-if [ ! -d "$OS_O_A_L_DIR" ] ; then
-    OS_O_A_L_DIR=`mktemp -d`
-    mkdir -p $OS_O_A_L_DIR/hack/templates
-    mkdir -p $OS_O_A_L_DIR/deployment
-    curl https://raw.githubusercontent.com/$GITHUB_REPO/origin-aggregated-logging/$GITHUB_BRANCH/hack/templates/dev-builds.yaml > $OS_O_A_L_DIR/hack/templates/dev-builds.yaml
-    curl https://raw.githubusercontent.com/$GITHUB_REPO/origin-aggregated-logging/$GITHUB_BRANCH/deployment/deployer.yaml > $OS_O_A_L_DIR/deployment/deployer.yaml
-fi
-
-if [ -f /share/origin/examples/sample-app/pullimages.sh ] ; then
-    bash -x /share/origin/examples/sample-app/pullimages.sh
-else
-    bash <(curl https://raw.githubusercontent.com/openshift/origin/master/examples/sample-app/pullimages.sh)
-fi
-
-if [ -n "$CHECK_HOSTNAME" ] ; then
-    myhost=`hostname`
-    myip=`getent ahostsv4 $myhost|awk "/ STREAM $myhost/ { print \\$1 }"`
-    revhost=`getent hosts $myip|awk '{print $2}'`
-
-    if [ "$myhost" != "$revhost" ] ; then
-        echo Error: hostname is $myhost but $myip resolves to $revhost
-        exit 1
-    fi
+# must have working forward and reverse resolution or openshift commands
+# will fail in weird and inscrutable ways
+#myhost=`hostname`
+#myip=`getent ahostsv4 $myhost|awk "/ STREAM $myhost/ { print \\$1 }"`
+#revhost=`getent hosts $myip|awk '{print $2}'`
+# looks like it will work if ipv6 forward/rev is working even if ipv4 is not
+myhost=`hostname`
+myip=`getent hosts $myhost|awk '{print $1}'`
+revhost=`getent hosts $myip|awk '{print $2}'`
+if [ "$myhost" != "$revhost" ] ; then
+    echo Error: hostname is $myhost but $myip resolves to $revhost
+    exit 1
 fi
 
 # openshift skydns component conflicts with libvirt dnsmasq
@@ -86,9 +104,58 @@ else
     masterurlhack=",MASTER_URL=https://172.30.0.1:443"
 fi
 
-if sudo grep \^\#INSECURE_REGISTRY= /etc/sysconfig/docker ; then
-    sudo sed -i -e "s,^#INSECURE_REGISTRY.*\$,INSECURE_REGISTRY='--insecure registry 172.30.0.0/16'," /etc/sysconfig/docker
+OS_O_A_L_DIR=${OS_O_A_L_DIR:-$HOME/origin-aggregated-logging}
+if [ ! -d "$OS_O_A_L_DIR" ] ; then
+    OS_O_A_L_DIR=/share/origin-aggregated-logging
+fi
+
+if [ ! -d "$OS_O_A_L_DIR" ] ; then
+    OS_O_A_L_DIR=`mktemp -d`
+    pushd $OS_O_A_L_DIR
+    git clone https://github.com/$GITHUB_REPO/origin-aggregated-logging -b $GITHUB_BRANCH
+    OS_O_A_L_DIR=`pwd`/origin-aggregated-logging
+    popd
+fi
+
+if ! grep '^INSECURE_REGISTRY=' /etc/sysconfig/docker > /dev/null 2>&1 ; then
+    echo "INSECURE_REGISTRY='--insecure-registry 172.30.0.0/16'" >> /etc/sysconfig/docker
     sudo systemctl restart docker
+elif ! sudo systemctl status docker ; then
+    sudo systemctl start docker
+fi
+
+OS_VOL_DIR_BASE=$OS_VOL_DIR_BASE
+OS_VOL_DIR_BASE=${OS_VOL_DIR_BASE:-/var/lib/origin}
+OS_VOL_DIR=${OS_VOL_DIR:-$OS_VOL_DIR_BASE/openshift.local.volumes}
+
+if [ -n "$ORIGIN_CONTAINER" ] ; then
+    if sudo test -d $OS_VOL_DIR ; then
+        echo $OS_VOL_DIR exists
+    else
+        sudo mkdir -p $OS_VOL_DIR
+    fi
+
+    if sudo secon --file $OS_VOL_DIR | grep '^type: svirt_sandbox_file_t' ; then
+        echo selinux already set up for $OS_VOL_DIR
+    else
+        sudo chcon -R -t svirt_sandbox_file_t $OS_VOL_DIR
+    fi
+fi
+
+# make sure openshift is running
+if [ -z "$ORIGIN_CONTAINER" ] ; then
+    # make sure we have the openshift commands in PATH
+    if ! type oc > /dev/null 2>&1 ; then
+        export PATH=$OS_VOL_DIR_BASE/$OSHIFT_FILE_NAME:$PATH
+    fi
+
+    check_openshift
+fi
+
+if [ -f /share/origin/examples/sample-app/pullimages.sh ] ; then
+    bash -x /share/origin/examples/sample-app/pullimages.sh
+else
+    bash <(curl https://raw.githubusercontent.com/openshift/origin/master/examples/sample-app/pullimages.sh)
 fi
 
 if type firewall-cmd > /dev/null 2>&1 ; then
@@ -102,21 +169,6 @@ if type firewall-cmd > /dev/null 2>&1 ; then
             sudo firewall-cmd --permanent --zone=trusted --add-interface=docker0
         fi
     fi
-fi
-
-OS_VOL_DIR_BASE=${OS_VOL_DIR_BASE:-/var/lib/origin}
-OS_VOL_DIR=${OS_VOL_DIR:-$OS_VOL_DIR_BASE/openshift.local.volumes}
-
-if sudo test -d $OS_VOL_DIR ; then
-    echo $OS_VOL_DIR exists
-else
-    sudo mkdir -p $OS_VOL_DIR
-fi
-
-if sudo secon --file $OS_VOL_DIR | grep '^type: svirt_sandbox_file_t' ; then
-    echo selinux already set up for $OS_VOL_DIR
-else
-    sudo chcon -R -t svirt_sandbox_file_t $OS_VOL_DIR
 fi
 
 #PRE_BUILD_IMAGES=1
@@ -164,18 +216,14 @@ export CURL_CA_BUNDLE=$OS_VOL_DIR_BASE/openshift.local.config/master/ca.crt
 EOF
 fi
 
-# I don't think this is necessary since later it uses the full url to create the app
-#$ORIGIN_CONTAINER mkdir -p $OS_VOL_DIR_BASE/examples/sample-app
-#$ORIGIN_CONTAINER wget \
-#     https://raw.githubusercontent.com/openshift/origin/master/examples/sample-app/application-template-stibuild.json \
-#     -O $OS_VOL_DIR_BASE/examples/sample-app/application-template-stibuild.json
-
 $ORIGIN_CONTAINER bash -c "echo export CURL_CA_BUNDLE=$OS_VOL_DIR_BASE/openshift.local.config/master/ca.crt >> /root/.bashrc"
 $ORIGIN_CONTAINER bash -c "echo export CURL_CA_BUNDLE=$OS_VOL_DIR_BASE/openshift.local.config/master/ca.crt >> /root/.bash_profile"
 if [ -z "$ORIGIN_CONTAINER" ] ; then
     export CURL_CA_BUNDLE=$OS_VOL_DIR_BASE/openshift.local.config/master/ca.crt
 fi
-$ORIGIN_CONTAINER oadm registry --create --credentials=$OS_VOL_DIR_BASE/openshift.local.config/master/openshift-registry.kubeconfig
+oc login -u 'system:admin'
+oc project default
+$ORIGIN_CONTAINER oadm --v=4 registry --credentials=$OS_VOL_DIR_BASE/openshift.local.config/master/openshift-registry.kubeconfig
 
 echo waiting for docker registry . . .
 ii=300
@@ -280,7 +328,9 @@ $ORIGIN_CONTAINER oc login --certificate-authority=$OS_VOL_DIR_BASE/openshift.lo
 $ORIGIN_CONTAINER oc whoami
 
 $ORIGIN_CONTAINER oc new-project test --display-name="OpenShift 3 Sample" --description="This is an example project to demonstrate OpenShift v3"
-$ORIGIN_CONTAINER oc new-app -f https://raw.githubusercontent.com/openshift/origin/master/examples/sample-app/application-template-stibuild.json
+TEST_BRANCH=v1.1.3
+# use master in next release of origin
+$ORIGIN_CONTAINER oc new-app -f https://raw.githubusercontent.com/openshift/origin/$TEST_BRANCH/examples/sample-app/application-template-stibuild.json
 
 echo waiting for build to start . . .
 sleep 10

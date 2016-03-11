@@ -27,4 +27,4 @@ if [ -z "$found" ] ; then
     exit 1
 fi
 
-remote-viewer `sudo virsh domdisplay "$1"`
+sudo virt-viewer "$1"

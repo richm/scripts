@@ -143,6 +143,7 @@ cloud_config_modules:
  - mcollective
  - disable-ec2-metadata
  - runcmd
+ - bootcmd
  - yum_add_repo
  - package_update_upgrade_install
 EOF
@@ -193,6 +194,25 @@ write_files:
     content: |
         Defaults !requiretty
 EOF
+    if [ -n "$VM_BOOT_SCRIPT" ] ; then
+        # create firstboot script - assume systemd
+        cat <<EOF
+-   path: /etc/systemd/system/multi-user.target.wants/setupvm-firstboot.service
+    permissions: 440
+    content: |
+        [Unit]
+        Description=setupvm firstboot service
+        
+        [Service]
+        Type=simple
+        WorkingDirectory=/var/log
+        ExecStart=/bin/sh /root/$VM_BOOT_SCRIPT_BASE
+        SyslogIdentifier=setupvm-firstboot
+        
+        [Install]
+        WantedBy=multi-user.target
+EOF
+    fi
     # Add base OS yum repos
     if [ -n "$VM_OS_BASE_REPO_LIST" -o -n "$VM_REPO_LIST" -o -n "$VM_YAML_REPOS" ] ; then
         echo "yum_repos:"
@@ -257,13 +277,24 @@ EOF
 cat <<EOF
  - [touch, $VM_WAIT_FILE]
 EOF
+    if [ -n "$VM_BOOT_SCRIPT" ] ; then
+        cat <<EOF
+ - cp /mnt/*.conf /root
+ - cp /mnt/$VM_BOOT_SCRIPT_BASE /root/$VM_BOOT_SCRIPT_BASE
+ - chmod +x /root/$VM_BOOT_SCRIPT_BASE
+ - reboot
+power_state:
+ mode: reboot
+ message: rebooting to run /root/$VM_BOOT_SCRIPT_BASE
+EOF
+    fi
 }
 
 make_cdrom() {
     # just put everything on the CD
     # first need a staging area
     staging=${VM_CD_STAGE_DIR:-`mktemp -d`}
-    for file in $VM_POST_SCRIPT $VM_EXTRA_FILES "$@" ; do
+    for file in $VM_POST_SCRIPT $VM_EXTRA_FILES $VM_BOOT_SCRIPT "$@" ; do
         if [ ! -f "$file" ] ; then continue ; fi
         err=
         outfile=$staging/`basename $file .in`
@@ -488,6 +519,9 @@ get_config() {
     VM_WAIT_FILE=${VM_WAIT_FILE:-/root/installcomplete}
     if [ -n "$VM_POST_SCRIPT" ] ; then
         VM_POST_SCRIPT_BASE=`basename $VM_POST_SCRIPT 2> /dev/null`
+    fi
+    if [ -n "$VM_BOOT_SCRIPT" ] ; then
+        VM_BOOT_SCRIPT_BASE=`basename $VM_BOOT_SCRIPT 2> /dev/null`
     fi
 
     VM_NETWORK_NAME=${VM_NETWORK_NAME:-default}
