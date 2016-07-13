@@ -11,8 +11,8 @@ RELDIR=${RELDIR:-$OS_ROOT/_output/local/releases}
 # for cloning origin-aggregated-logging from a specific repo and branch
 # you can override just the GITHUB_REPO=myusername or the entire GIT_URL
 # if it is hosted somewhere other than github
-GITHUB_REPO=${GITHUB_REPO:-richm}
-GIT_BRANCH=${GIT_BRANCH:-test-improvements}
+GITHUB_REPO=${GITHUB_REPO:-ewolinetz}
+GIT_BRANCH=${GIT_BRANCH:-fix-testing}
 GIT_URL=${GIT_URL:-https://github.com/${GITHUB_REPO}/origin-aggregated-logging}
 OAL_LOCAL_PATH=`echo $GIT_URL | sed 's,https://,,'`
 OS_O_A_L_DIR=${OS_O_A_L_DIR:-/data/src/github.com/openshift/origin-aggregated-logging}
