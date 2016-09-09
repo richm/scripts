@@ -269,6 +269,8 @@ if test -n "$needASCert" ; then
         chmod 600 adm.conf
         cd $secdir
     fi
+    # fix SELinux labels
+    restorecon -FR $assecdir
 fi
 
 # enable SSL in the directory server
