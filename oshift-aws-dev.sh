@@ -41,8 +41,10 @@ vagrant sync-origin-aggregated-logging -s -c
 vagrant ssh -c "if [ ! -d /tmp/openshift ] ; then mkdir /tmp/openshift ; fi ; sudo chmod 777 /tmp/openshift" -- -n
 # doesn't work in enforcing - see https://github.com/openshift/origin-aggregated-logging/issues/89
 #vagrant ssh -c "sudo setenforce Enforcing"
+vagrant ssh -c "cd $OS_ROOT ; GOPATH=/data OS_ROOT=$OS_ROOT hack/vendor-console.sh" -- -n
+
 # pre-load images to make builds faster
-for image in openshift/origin:v1.2.0 openshift/base-centos7 centos:centos7 openshift/origin-logging-elasticsearch openshift/origin-logging-fluentd openshift/origin-logging-curator openshift/origin-logging-kibana node:0.10.36 centos/ruby-22-centos7 ; do
+for image in openshift/origin:v1.3.0 openshift/base-centos7 centos:centos7 openshift/origin-logging-elasticsearch openshift/origin-logging-fluentd openshift/origin-logging-curator openshift/origin-logging-kibana node:0.10.36 centos/ruby-22-centos7 ; do
     echo pulling image $image ...
     vagrant ssh -c "docker pull $image" -- -n
     echo done
