@@ -2,6 +2,23 @@
 
 set -euxo pipefail
 
+getremoteip() {
+    #ssh openshiftdevel curl -s http://169.254.169.254/latest/meta-data/public-ipv4
+    ssh openshiftdevel -G|awk '/^hostname/ {print $2}'
+}
+
+getremotefqdn() {
+    #ssh openshiftdevel curl -s http://169.254.169.254/latest/meta-data/public-hostname
+    getent hosts $1 | awk '{print $2}'
+}
+
+update_etc_hosts() {
+    for item in "$@" ; do
+        sudo sed -i -e "/$item/d" /etc/hosts
+    done
+    echo "$@" | sudo tee -a /etc/hosts > /dev/null
+}
+
 scriptname=`basename $0`
 if [ -f $HOME/.config/$scriptname ] ; then
     . $HOME/.config/$scriptname
@@ -9,7 +26,7 @@ fi
 
 OS=${OS:-rhel}
 TESTNAME=${TESTNAME:-logging}
-INSTANCE_TYPE=${INSTANCE_TYPE:-c4.xlarge}
+INSTANCE_TYPE=${INSTANCE_TYPE:-m4.xlarge}
 # on the remote machine
 OS_ROOT=${OS_ROOT:-/data/src/github.com/openshift/origin}
 RELDIR=${RELDIR:-$OS_ROOT/_output/local/releases}
@@ -36,20 +53,45 @@ if [ ! -d .venv ] ; then
 fi
 PS1=unused
 source .venv/bin/activate
-pip install git+https://github.com/openshift/origin-ci-tool.git --process-dependency-links
-pip install --upgrade git+https://github.com/openshift/origin-ci-tool.git --process-dependency-links
-pip install boto boto3
-oct bootstrap self
-oct provision remote all-in-one --os $OS --provider aws --stage build --name $INSTNAME
-oct sync local origin-aggregated-logging --branch $GIT_BRANCH --merge-into master --src $HOME/origin-aggregated-logging
+NO_SKIP=1
+if [ -n "${NO_SKIP:-}" ] ; then
+    if pip show origin-ci-tool > /dev/null ; then
+        pip install --upgrade git+https://github.com/openshift/origin-ci-tool.git --process-dependency-links
+    else
+        pip install git+https://github.com/openshift/origin-ci-tool.git --process-dependency-links
+    fi
+    for pkg in boto boto3 ; do
+        if pip show $pkg > /dev/null ; then
+            pip install --upgrade $pkg
+        else
+            pip install $pkg
+        fi
+    done
+    oct bootstrap self
 
-fqdn=${fqdn:-openshiftdevel}
+    oct configure aws-defaults master_security_group_ids $AWS_SECURITY_GROUPS
+    oct configure aws-defaults master_instance_type $INSTANCE_TYPE
+    oct provision remote all-in-one --os $OS --provider aws --stage build --name $INSTNAME
+fi
+
+ip=`getremoteip`
+fqdn=`getremotefqdn $ip`
+
 kibana_host=kibana.$fqdn
 kibana_ops_host=kibana-ops.$fqdn
-LOG_DIR=/tmp/origin-aggregated-logging/logs
+update_etc_hosts $ip $fqdn $kibana_host $kibana_ops_host
 
+oct sync local origin-aggregated-logging --branch $GIT_BRANCH --merge-into master --src $HOME/origin-aggregated-logging
+#oct sync remote openshift-ansible --branch master
+#oct sync remote origin-aggregated-logging --refspec pull/471/head --branch pull-471 --merge-into master
+#cd /data/src/github.com/openshift/origin-aggregated-logging
+#hack/build-images.sh
+########## STARTING STAGE: BUILD AN OPENSHIFT-ANSIBLE RELEASE ##########
+
+LOG_DIR=/tmp/origin-aggregated-logging/logs
 runfile=`mktemp`
 trap "rm -f $runfile" ERR EXIT INT TERM
+
 cat > $runfile <<EOF
 echo PATH=$PATH
 PATH=$PATH:/usr/sbin:$OS_ROOT/_output/local/bin/linux/amd64
@@ -65,9 +107,9 @@ export ENABLE_OPS_CLUSTER=true
 export DO_CLEANUP=false
 export SETUP_ONLY=false
 export VERBOSE=1
-#export PUBLIC_MASTER_HOST=$fqdn
-#export KIBANA_HOST=$kibana_host
-#export KIBANA_OPS_HOST=$kibana_ops_host
+export PUBLIC_MASTER_HOST=$fqdn
+export KIBANA_HOST=$kibana_host
+export KIBANA_OPS_HOST=$kibana_ops_host
 export OS_ANSIBLE_REPO=$ANSIBLE_URL
 export OS_ANSIBLE_BRANCH=$ANSIBLE_BRANCH
 export OS_DEBUG=true

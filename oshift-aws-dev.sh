@@ -26,9 +26,7 @@ OAL_LOCAL_PATH=`echo $GIT_URL | sed 's,https://,,'`
 OS_O_A_L_DIR=${OS_O_A_L_DIR:-/data/src/github.com/openshift/origin-aggregated-logging}
 #USE_AMI=${USE_AMI:-fork_ami_openshift3_logging-1.4-backports}
 
-export OPENSHIFT_VM_NAME_PREFIX=${USER:-$TESTNAME}-
-
-INSTNAME=${INSTNAME:-origin_${OPENSHIFT_VM_NAME_PREFIX}$TESTNAME-$OS-1}
+INSTNAME=${INSTNAME:-origin_$USER-$TESTNAME-$OS-1}
 
 pushd $HOME/origin-aggregated-logging
 # use vagrant from origin
@@ -38,6 +36,9 @@ fi
 if [ ! -d contrib ] ; then
     ln -s ../origin/contrib
 fi
+
+# clean up old instance
+rm -rf .vagrant/machines/openshiftdev/aws
 
 vagrant origin-init --stage inst --os $OS --instance-type $INSTANCE_TYPE "$INSTNAME"
 if [ -n "${USE_AMI:-}" ] ; then
@@ -78,6 +79,6 @@ vagrant test-origin-aggregated-logging -d --env GIT_URL=$GIT_URL \
         --env OS_ANSIBLE_BRANCH=$ANSIBLE_BRANCH \
         --env OS_DEBUG=true ${EXTRA_ENV:-}
 
-echo Use \'OPENSHIFT_VM_NAME_PREFIX=${OPENSHIFT_VM_NAME_PREFIX} vagrant ssh\' if you want to poke around in the machine
-echo Use \'OPENSHIFT_VM_NAME_PREFIX=${OPENSHIFT_VM_NAME_PREFIX} vagrant modify-instance -r "$INSTNAME"-terminate -s
+echo Use \'vagrant ssh\' if you want to poke around in the machine
+echo Use \'vagrant modify-instance -r "$INSTNAME"-terminate -s
 echo when you are finished
