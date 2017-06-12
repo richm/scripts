@@ -42,6 +42,7 @@ ANSIBLE_URL=${ANSIBLE_URL:-https://github.com/${ANSIBLE_REPO}/openshift-ansible}
 OAL_LOCAL_PATH=`echo $GIT_URL | sed 's,https://,,'`
 OS_O_A_L_DIR=${OS_O_A_L_DIR:-/data/src/github.com/openshift/origin-aggregated-logging}
 #USE_AMI=${USE_AMI:-fork_ami_openshift3_logging-1.4-backports}
+export AWS_SECURITY_GROUPS=${AWS_SECURITY_GROUPS:-sg-e1760186}
 
 INSTNAME=${INSTNAME:-origin_$USER-$TESTNAME-$OS-1}
 

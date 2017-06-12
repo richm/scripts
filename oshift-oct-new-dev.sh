@@ -44,6 +44,7 @@ OS_O_A_L_DIR=${OS_O_A_L_DIR:-/data/src/github.com/openshift/origin-aggregated-lo
 OS_O_A_DIR=${OS_O_A_DIR:-/data/src/github.com/openshift/openshift-ansible}
 OS_A_C_J_DIR=${OS_A_C_J_DIR:-/data/src/github.com/openshift/aos-cd-jobs}
 #USE_AMI=${USE_AMI:-fork_ami_openshift3_logging-1.4-backports}
+export AWS_SECURITY_GROUPS=${AWS_SECURITY_GROUPS:-sg-e1760186}
 
 INSTNAME=${INSTNAME:-origin_$USER-$TESTNAME-$OS-1}
 
