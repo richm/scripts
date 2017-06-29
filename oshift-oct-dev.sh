@@ -69,11 +69,10 @@ if [ -n "${NO_SKIP:-}" ] ; then
         fi
     done
     oct bootstrap self
-
-    oct configure aws-defaults master_security_group_ids $AWS_SECURITY_GROUPS
-    oct configure aws-defaults master_instance_type $INSTANCE_TYPE
-    oct provision remote all-in-one --os $OS --provider aws --stage build --name $INSTNAME
 fi
+oct configure aws-defaults master_security_group_ids $AWS_SECURITY_GROUPS
+oct configure aws-defaults master_instance_type $INSTANCE_TYPE
+oct provision remote all-in-one --os $OS --provider aws --stage build --name $INSTNAME
 
 ip=`getremoteip`
 fqdn=`getremotefqdn $ip`
@@ -97,6 +96,10 @@ cat > $runfile <<EOF
 echo PATH=$PATH
 PATH=$PATH:/usr/sbin:$OS_ROOT/_output/local/bin/linux/amd64
 export PATH
+# hack - why is this now necessary as of Tue Jun 27 2017?
+# hack - and now not necessary Wed Jun 28 2017?
+#export API_BIND_HOST=0.0.0.0
+#export API_HOST=\$(openshift start --print-ip)
 #sudo sed -i -e 's/^#RateLimitBurst=.*\$/RateLimitBurst=1000000/' /etc/systemd/journald.conf
 #sudo systemctl restart systemd-journald
 export GIT_URL=$GIT_URL

@@ -71,11 +71,10 @@ if [ -n "${NO_SKIP:-}" ] ; then
         fi
     done
     oct bootstrap self
-
-    oct configure aws-defaults master_security_group_ids $AWS_SECURITY_GROUPS
-    oct configure aws-defaults master_instance_type $INSTANCE_TYPE
-    oct provision remote all-in-one --os $OS --provider aws --stage build --name $INSTNAME
 fi
+oct configure aws-defaults master_security_group_ids $AWS_SECURITY_GROUPS
+oct configure aws-defaults master_instance_type $INSTANCE_TYPE
+oct provision remote all-in-one --os $OS --provider aws --stage build --name $INSTNAME
 
 ip=`getremoteip`
 fqdn=`getremotefqdn $ip`
