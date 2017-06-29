@@ -121,7 +121,10 @@ export LOG_DIR=$LOG_DIR
 mkdir -p $LOG_DIR
 ${EXTRA_ENV:-}
 pushd $OS_O_A_L_DIR/hack/testing
+sudo wget -O /usr/local/bin/stern https://github.com/wercker/stern/releases/download/1.5.1/stern_linux_amd64 && sudo chmod +x /usr/local/bin/stern
 ./logging.sh
+mkdir /home/origin/.kube
+cp /tmp/openshift/origin-aggregated-logging/openshift.local.config/master/admin.kubeconfig /home/origin/.kube/config
 EOF
 scp $runfile $fqdn:/tmp
 ssh -n $fqdn "bash $runfile"
