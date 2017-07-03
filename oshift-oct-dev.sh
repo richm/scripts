@@ -86,7 +86,25 @@ oct sync local origin-aggregated-logging --branch $GIT_BRANCH --merge-into maste
 #oct sync remote origin-aggregated-logging --refspec pull/471/head --branch pull-471 --merge-into master
 #cd /data/src/github.com/openshift/origin-aggregated-logging
 #hack/build-images.sh
-########## STARTING STAGE: BUILD AN OPENSHIFT-ANSIBLE RELEASE ##########
+
+# make etcd use a ramdisk
+script="$( mktemp )"
+cat <<SCRIPT >"${script}"
+#!/bin/bash
+set -o errexit -o nounset -o pipefail -o xtrace
+cd "\${HOME}"
+sudo su root <<SUDO
+mkdir -p /tmp
+mount -t tmpfs -o size=4096m tmpfs /tmp
+mkdir -p /tmp/etcd
+chmod a+rwx /tmp/etcd
+restorecon -R /tmp
+echo "ETCD_DATA_DIR=/tmp/etcd" >> /etc/environment
+SUDO
+SCRIPT
+chmod +x "${script}"
+scp "${script}" openshiftdevel:"${script}"
+ssh -n openshiftdevel "bash ${script}"
 
 LOG_DIR=/tmp/origin-aggregated-logging/logs
 runfile=`mktemp`
@@ -96,8 +114,7 @@ cat > $runfile <<EOF
 echo PATH=$PATH
 PATH=$PATH:/usr/sbin:$OS_ROOT/_output/local/bin/linux/amd64
 export PATH
-# hack - why is this now necessary as of Tue Jun 27 2017?
-# hack - and now not necessary Wed Jun 28 2017?
+# this is a hack used on occasion but hopefully not any more
 #export API_BIND_HOST=0.0.0.0
 #export API_HOST=\$(openshift start --print-ip)
 #sudo sed -i -e 's/^#RateLimitBurst=.*\$/RateLimitBurst=1000000/' /etc/systemd/journald.conf
