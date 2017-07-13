@@ -142,6 +142,7 @@ sudo wget -O /usr/local/bin/stern https://github.com/wercker/stern/releases/down
 ./logging.sh
 mkdir /home/origin/.kube
 cp /tmp/openshift/origin-aggregated-logging/openshift.local.config/master/admin.kubeconfig /home/origin/.kube/config
+chmod o+w /home/origin/.kube/config
 EOF
 scp $runfile $fqdn:/tmp
 ssh -n $fqdn "bash $runfile"
