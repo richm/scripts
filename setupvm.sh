@@ -163,7 +163,7 @@ EOF
     if [ -n "$VM_SSH_KEY" ] ; then
         cat <<EOF
     ssh_authorized_keys:
-      - ssh-rsa $VM_SSH_KEY
+      - $VM_SSH_KEY
 EOF
     fi
     # If a user wasn't specified, just modify
@@ -179,7 +179,7 @@ EOF
     if [ -n "$VM_SSH_KEY" ]; then
         cat <<EOF
 ssh_authorized_keys:
-    - ssh-rsa $VM_SSH_KEY
+  - $VM_SSH_KEY
 EOF
         if [ -n "$VM_DISABLE_ROOT_SSH" ] ; then
             echo "disable_root: true"
