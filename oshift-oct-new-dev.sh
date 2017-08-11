@@ -93,11 +93,18 @@ oct sync local openshift-ansible --branch $ANSIBLE_BRANCH --merge-into master --
 # also needs aos_cd_jobs
 oct sync remote aos-cd-jobs --branch master
 
+# HACK HACK HACK
+# there is a problem with the enterprise-3.3 repo:
+#https://use-mirror2.ops.rhcloud.com/enterprise/enterprise-3.3/latest/RH7-RHAOS-3.3/x86_64/os/repodata/repomd.xml: [Errno 14] HTTPS Error 404 - Not Found
+#so just disable this repo for now
+# fixed 2017-08-10
+#ssh -n openshiftdevel "echo enabled=0 | sudo tee -a /etc/yum.repos.d/rhel-7-server-ose-3.3-rpms.repo"
+
 #      title: "build an origin-aggregated-logging release"
 #      repository: "origin-aggregated-logging"
 #      script: |-
 #        hack/build-images.sh
-ssh openshiftdevel "cd $OS_O_A_L_DIR; hack/build-images.sh"
+ssh -n openshiftdevel "cd $OS_O_A_L_DIR; hack/build-images.sh"
 
 #      title: "build an openshift-ansible release"
 #      repository: "openshift-ansible"
@@ -130,6 +137,7 @@ jobs_repo=$OS_A_C_J_DIR
 last_tag="\$( git describe --tags --abbrev=0 --exact-match HEAD )"
 last_commit="\$( git log -n 1 --pretty=%h )"
 sudo yum install -y "atomic-openshift-utils\${last_tag/openshift-ansible/}.git.0.\${last_commit}.el7"
+rpm -V "atomic-openshift-utils\${last_tag/openshift-ansible/}.git.0.\${last_commit}.el7"
 EOF
 scp $runfile openshiftdevel:/tmp
 ssh -n openshiftdevel "bash $runfile"
@@ -160,6 +168,23 @@ jobs_repo=$OS_A_C_J_DIR
 git log -1 --pretty=%h >> "\${jobs_repo}/ORIGIN_COMMIT"
 ( source hack/lib/init.sh; os::build::rpm::get_nvra_vars; echo "-\${OS_RPM_VERSION}-\${OS_RPM_RELEASE}" ) >> "\${jobs_repo}/ORIGIN_PKG_VERSION"
 EOF
+scp $runfile openshiftdevel:/tmp
+ssh -n openshiftdevel "bash $runfile"
+
+# make etcd use a ramdisk
+cat <<SCRIPT > $runfile
+#!/bin/bash
+set -o errexit -o nounset -o pipefail -o xtrace
+cd "\${HOME}"
+sudo su root <<SUDO
+mkdir -p /tmp
+mount -t tmpfs -o size=4096m tmpfs /tmp
+mkdir -p /tmp/etcd
+chmod a+rwx /tmp/etcd
+restorecon -R /tmp
+echo "ETCD_DATA_DIR=/tmp/etcd" >> /etc/environment
+SUDO
+SCRIPT
 scp $runfile openshiftdevel:/tmp
 ssh -n openshiftdevel "bash $runfile"
 
@@ -194,31 +219,73 @@ EOF
 scp $runfile openshiftdevel:/tmp
 ssh -n openshiftdevel "bash $runfile"
 
+# HACK - create mux pvc
+if [ "${MUX_FILE_BUFFER_STORAGE_TYPE:-}" = pvc ] ; then
+    cat > $runfile <<EOF
+apiVersion: "v1"
+kind: "PersistentVolume"
+metadata:
+  name: logging-muxpv-1
+spec:
+  capacity:
+    storage: "6Gi"
+  accessModes:
+    - "ReadWriteOnce"
+  hostPath:
+    path: ${FILE_BUFFER_PATH:-/var/lib/fluentd}
+EOF
+    scp $runfile openshiftdevel:/tmp
+    ssh -n openshiftdevel "oc create --config=/etc/origin/master/admin.kubeconfig -f $runfile"
+fi
+
 #      title: "install origin-aggregated-logging"
 #      repository: "aos-cd-jobs"
 cat > $runfile <<EOF
 cd $OS_A_C_J_DIR
-ansible-playbook -vv --become               \
-  --become-user root         \
-  --connection local         \
+ansible-playbook -vv --become \
+  --become-user root \
+  --connection local \
   --inventory sjb/inventory/ \
-  -e deployment_type=origin  \
+  -e deployment_type=origin \
   -e openshift_logging_image_prefix="openshift/origin-" \
-  -e openshift_logging_kibana_hostname="$kibana_host"           \
-  -e openshift_logging_kibana_ops_hostname="$kibana_ops_host"           \
-  -e openshift_logging_master_public_url="https://$fqdn:8443"          \
+  -e openshift_logging_kibana_hostname="$kibana_host" \
+  -e openshift_logging_kibana_ops_hostname="$kibana_ops_host" \
+  -e openshift_logging_master_public_url="https://$fqdn:8443" \
   -e openshift_master_logging_public_url="https://$kibana_host" \
+  -e openshift_logging_es_hostname=${ES_HOST:-es.$fqdn} \
+  -e openshift_logging_es_ops_hostname=${ES_OPS_HOST:-es-ops.$fqdn} \
+  -e openshift_logging_mux_hostname=${MUX_HOST:-mux.$fqdn} \
+  ${EXTRA_ANSIBLE:-} \
   /usr/share/ansible/openshift-ansible/playbooks/byo/openshift-cluster/openshift-logging.yml \
   --skip-tags=update_master_config
 EOF
+cat $runfile
 scp $runfile openshiftdevel:/tmp
 ssh -n openshiftdevel "bash $runfile"
+
+if [ -n "${PRESERVE:-}" ] ; then
+    id=$( aws ec2 --profile rh-dev describe-instances --output text --filters "Name=tag:Name,Values=$INSTNAME" --query 'Reservations[].Instances[].[InstanceId]' )
+    aws ec2 --profile rh-dev create-tags --resources $id \
+        --tags Key=Name,Value=${INSTNAME}-preserve
+fi
+
+#### There seems to be some sort of performance problem - richm 2017-08-04
+# not sure what has changed, but now openshift, the default/logging
+# pods, and the os are spewing too much for fluentd to keep up with
+# when it has 100m cpu, on a aws m4.xlarge system
+# for now, remove the limits on fluentd to unblock the tests
+# oc get daemonset/logging-fluentd -o yaml > "${ARTIFACT_DIR}/logging-fluentd-orig.yaml"
+# oc patch daemonset/logging-fluentd --type=json --patch '[
+#        {"op":"remove","path":"/spec/template/spec/containers/0/resources"}]'
 
 #      title: "run logging tests"
 #      repository: "origin-aggregated-logging"
 cat > $runfile <<EOF
+sudo wget -O /usr/local/bin/stern https://github.com/wercker/stern/releases/download/1.5.1/stern_linux_amd64 && sudo chmod +x /usr/local/bin/stern
 cd $OS_O_A_L_DIR
-KUBECONFIG=/etc/origin/master/admin.kubeconfig TEST_ONLY=true SKIP_TEARDOWN=true make test
+${EXTRA_ENV:-}
+KUBECONFIG=/etc/origin/master/admin.kubeconfig TEST_ONLY=true \
+  SKIP_TEARDOWN=true JUNIT_REPORT=true make test
 EOF
 scp $runfile openshiftdevel:/tmp
 ssh -n openshiftdevel "bash $runfile"
