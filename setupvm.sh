@@ -264,7 +264,6 @@ EOF
         fi
         touch $VM_WAIT_FILE
 EOF
- 
     # Add base OS yum repos
     if [ -n "$VM_OS_BASE_REPO_LIST" -o -n "$VM_REPO_LIST" -o -n "$VM_YAML_REPOS" ] ; then
         echo "yum_repos:"
