@@ -137,15 +137,11 @@ cloud_config_modules:
  - locale
  - set-passwords
  - timezone
- - puppet
- - chef
- - salt-minion
- - mcollective
- - disable-ec2-metadata
  - runcmd
  - bootcmd
  - yum_add_repo
  - package_update_upgrade_install
+ - set_hostname
 EOF
     # If a user and password were specified,
     # set them as the default user.
@@ -213,6 +209,62 @@ EOF
         WantedBy=multi-user.target
 EOF
     fi
+    cat <<EOF
+-   path: /root/timedatectl_cloud_init.pp
+    owner: root:root
+    permissions: '0440'
+    content: !!binary |
+        j/98+QEAAAABAAAAEAAAAI3/fPkPAAAAU0UgTGludXggTW9kdWxlAgAAABEAAAABAAAACAAAAAAA
+        AAAWAAAAdGltZWRhdGVjdGxfY2xvdWRfaW5pdAMAAAAxLjBAAAAAAAAAAAAAAAAAAAAAAAAAAAEA
+        AAABAAAABAAAAAAAAAABAAAAAQAAAAEAAAAAAAAAZGJ1cwgAAAABAAAAc2VuZF9tc2cBAAAAAQAA
+        AAgAAAABAAAAAAAAAG9iamVjdF9yQAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAA
+        AAAAAAAAAABAAAAAAAAAAAAAAAACAAAAAgAAAAgAAAACAAAAAQAAAAEAAAAAAAAAQAAAAAAAAAAA
+        AAAAaW5pdHJjX3QTAAAAAQAAAAEAAAABAAAAAAAAAEAAAAAAAAAAAAAAAHN5c3RlbWRfdGltZWRh
+        dGVkX3QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAABAAAAAQAAAAAAAAAAAAAA
+        AQAAAAEAAAAAAAAAQAAAAEAAAAABAAAAAAAAAAEAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAABA
+        AAAAAQAAAAAAAAACAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAABAAAAAQAAAAEAAAAAAAAAAAAAAAAA
+        AAAAAAAAQAAAAAAAAAAAAAAAQAAAAEAAAAABAAAAAAAAAAEAAAAAAAAAQAAAAAAAAAAAAAAAQAAA
+        AEAAAAABAAAAAAAAAAMAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAA
+        QAAAAAAAAAAAAAAAAQAAAEAAAABAAAAAAQAAAAAAAAABAAAAAAAAAEAAAAAAAAAAAAAAAEAAAAAA
+        AAAAAAAAAEAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAEAA
+        AAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAEAAAAZGJ1cwEAAAABAAAA
+        AQAAAAEAAAAIAAAAb2JqZWN0X3ICAAAAAQAAAAEAAAACAAAACAAAAGluaXRyY190AQAAAAEAAAAB
+        AAAAEwAAAHN5c3RlbWRfdGltZWRhdGVkX3QBAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+        AA==
+-   path: /etc/systemd/system/setupvm.service
+    owner: root:root
+    permissions: '0440'
+    content: |
+        [Unit]
+        Description=setupvm setup script service
+        After=${VM_SYSTEMD_AFTER:-network}
+        Wants=${VM_SYSTEMD_WANTS:-network}
+        
+        [Service]
+        Type=simple
+        WorkingDirectory=/var/log
+        ExecStart=/bin/bash /root/setupvm.sh
+        SyslogIdentifier=setupvm
+
+        [Install]
+        WantedBy=multi-user.target
+-   path: /root/setupvm.sh
+    owner: root:root
+    permissions: '0750'
+    content: |
+        semodule -i /root/timedatectl_cloud_init.pp
+        rm -f /etc/systemd/system/setupvm.service
+        for pkg in $VM_GROUP_PACKAGE ; do
+            yum -y groupinstall \$pkg
+        done
+        mount -o ro /dev/sr0 /mnt
+        if [ -n "$VM_POST_SCRIPT_BASE" ] ; then
+            sh -x /mnt/$VM_POST_SCRIPT_BASE > /var/log/$VM_POST_SCRIPT_BASE.log 2>&1
+        fi
+        touch $VM_WAIT_FILE
+EOF
+ 
     # Add base OS yum repos
     if [ -n "$VM_OS_BASE_REPO_LIST" -o -n "$VM_REPO_LIST" -o -n "$VM_YAML_REPOS" ] ; then
         echo "yum_repos:"
@@ -257,25 +309,12 @@ EOF
     for pkg in $VM_PACKAGE_LIST ; do
         echo " - $pkg"
     done
-    # the hostname options in the metadata are just not working - they do not
-    # set the fqdn correctly - so do it here in a runcmd
+    # wrap the runcmds in a systemd service in order to make selinux happy
     cat <<EOF
 runcmd:
- - [hostname, $VM_FQDN]
-EOF
-    for pkg in $VM_GROUP_PACKAGE ; do
-        echo " - yum -y groupinstall \"$VM_GROUP_PACKAGE\""
-    done
-cat <<EOF
- - [mount, -o, ro, /dev/sr0, /mnt]
-EOF
-    if [ -n "$VM_POST_SCRIPT_BASE" ] ; then
-        cat <<EOF
- - sh -x /mnt/$VM_POST_SCRIPT_BASE > /var/log/$VM_POST_SCRIPT_BASE.log 2>&1
-EOF
-    fi
-cat <<EOF
- - [touch, $VM_WAIT_FILE]
+ - [ systemctl, daemon-reload ]
+ - [ systemctl, enable, setupvm.service ]
+ - [ systemctl, start, setupvm.service, --job-mode=ignore-dependencies ]
 EOF
     if [ -n "$VM_BOOT_SCRIPT" ] ; then
         cat <<EOF
@@ -286,6 +325,8 @@ EOF
 power_state:
  mode: reboot
  message: rebooting to run /root/$VM_BOOT_SCRIPT_BASE
+set_hostname:
+ fqdn: $VM_FQDN
 EOF
     fi
 }

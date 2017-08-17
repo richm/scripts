@@ -88,8 +88,8 @@ update_etc_hosts $ip $fqdn $kibana_host $kibana_ops_host
 #  sync_repos:
 #    - name: "origin-aggregated-logging"
 #    - name: "openshift-ansible"
-oct sync local origin-aggregated-logging --branch $GIT_BRANCH --merge-into master --src $HOME/origin-aggregated-logging
-oct sync local openshift-ansible --branch $ANSIBLE_BRANCH --merge-into master --src $HOME/openshift-ansible
+oct sync local origin-aggregated-logging --branch $GIT_BRANCH --merge-into ${GIT_BASE_BRANCH:-master} --src $HOME/origin-aggregated-logging
+oct sync local openshift-ansible --branch $ANSIBLE_BRANCH --merge-into ${ANSIBLE_BASE_BRANCH:-master} --src $HOME/openshift-ansible
 # also needs aos_cd_jobs
 oct sync remote aos-cd-jobs --branch master
 
@@ -268,15 +268,6 @@ if [ -n "${PRESERVE:-}" ] ; then
     aws ec2 --profile rh-dev create-tags --resources $id \
         --tags Key=Name,Value=${INSTNAME}-preserve
 fi
-
-#### There seems to be some sort of performance problem - richm 2017-08-04
-# not sure what has changed, but now openshift, the default/logging
-# pods, and the os are spewing too much for fluentd to keep up with
-# when it has 100m cpu, on a aws m4.xlarge system
-# for now, remove the limits on fluentd to unblock the tests
-# oc get daemonset/logging-fluentd -o yaml > "${ARTIFACT_DIR}/logging-fluentd-orig.yaml"
-# oc patch daemonset/logging-fluentd --type=json --patch '[
-#        {"op":"remove","path":"/spec/template/spec/containers/0/resources"}]'
 
 #      title: "run logging tests"
 #      repository: "origin-aggregated-logging"

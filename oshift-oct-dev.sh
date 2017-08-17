@@ -54,7 +54,7 @@ if [ ! -d .venv ] ; then
 fi
 PS1=unused
 source .venv/bin/activate
-NO_SKIP=1
+#NO_SKIP=1
 if [ -n "${NO_SKIP:-}" ] ; then
     if pip show origin-ci-tool > /dev/null ; then
         pip install --upgrade git+https://github.com/openshift/origin-ci-tool.git --process-dependency-links
@@ -140,7 +140,9 @@ ${EXTRA_ENV:-}
 pushd $OS_O_A_L_DIR/hack/testing
 sudo wget -O /usr/local/bin/stern https://github.com/wercker/stern/releases/download/1.5.1/stern_linux_amd64 && sudo chmod +x /usr/local/bin/stern
 ./logging.sh
-mkdir /home/origin/.kube
+if [ ! -d /home/origin/.kube ] ; then
+   mkdir /home/origin/.kube
+fi
 cp /tmp/openshift/origin-aggregated-logging/openshift.local.config/master/admin.kubeconfig /home/origin/.kube/config
 chmod o+w /home/origin/.kube/config
 EOF
