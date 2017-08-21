@@ -163,10 +163,29 @@ ssh -n openshiftdevel "bash $runfile"
 #      title: "determine the release commit for origin images and version for rpms"
 #      repository: "origin"
 cat > $runfile <<EOF
+# is logging using master or a release branch?
+pushd $OS_O_A_L_DIR
+curbranch=\$( git branch | awk '/^[*]/ {print \$2}' )
+popd
 cd $OS_ROOT
 jobs_repo=$OS_A_C_J_DIR
-git log -1 --pretty=%h >> "\${jobs_repo}/ORIGIN_COMMIT"
-( source hack/lib/init.sh; os::build::rpm::get_nvra_vars; echo "-\${OS_RPM_VERSION}-\${OS_RPM_RELEASE}" ) >> "\${jobs_repo}/ORIGIN_PKG_VERSION"
+if [ "\${curbranch}" = master ] ; then
+   git log -1 --pretty=%h >> "\${jobs_repo}/ORIGIN_COMMIT"
+   ( source hack/lib/init.sh; os::build::rpm::get_nvra_vars; echo "-\${OS_RPM_VERSION}-\${OS_RPM_RELEASE}" ) >> "\${jobs_repo}/ORIGIN_PKG_VERSION"
+else
+    pushd $OS_O_A_L_DIR
+    # get repo ver from branch name
+    repover=\$( echo "\${curbranch}" | sed 's/release-//' )
+    # get version from tag
+    commitver=\$( git describe --tags --abbrev=0 )
+    # pkg ver is commitver with leading "-" instead of "v"
+    pkgver=\$( echo "\$commitver" | sed 's/^v/-/' )
+    sudo yum -y install centos-release-openshift-origin\$repover
+    echo "\${commitver}" > $OS_A_C_J_DIR/ORIGIN_COMMIT
+    echo "\${pkgver}" > $OS_A_C_J_DIR/ORIGIN_PKG_VERSION
+    # disable local origin repo
+    sudo sed -i "s/enabled.*=.*1/enabled=0/" /etc/yum.repos.d/origin-local-release.repo
+fi
 EOF
 scp $runfile openshiftdevel:/tmp
 ssh -n openshiftdevel "bash $runfile"
@@ -192,13 +211,14 @@ ssh -n openshiftdevel "bash $runfile"
 #      repository: "aos-cd-jobs"
 cat > $runfile <<EOF
 cd $OS_A_C_J_DIR
-ansible-playbook -vv --become               \
+ansible-playbook -vvv --become               \
   --become-user root         \
   --connection local         \
   --inventory sjb/inventory/ \
   -e deployment_type=origin  \
   /usr/share/ansible/openshift-ansible/playbooks/byo/openshift-node/network_manager.yml
-ansible-playbook -vv --become               \
+
+ansible-playbook -vvv --become               \
   --become-user root         \
   --connection local         \
   --inventory sjb/inventory/ \
@@ -209,7 +229,7 @@ ansible-playbook -vv --become               \
 /usr/share/ansible/openshift-ansible/playbooks/byo/config.yml
 EOF
 scp $runfile openshiftdevel:/tmp
-ssh -n openshiftdevel "bash $runfile"
+ssh -n openshiftdevel "bash -x $runfile"
 
 #  title: "expose the kubeconfig"
 cat > $runfile <<EOF
