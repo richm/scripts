@@ -89,6 +89,7 @@ update_etc_hosts $ip $fqdn $kibana_host $kibana_ops_host
 #    - name: "origin-aggregated-logging"
 #    - name: "openshift-ansible"
 oct sync local origin-aggregated-logging --branch $GIT_BRANCH --merge-into ${GIT_BASE_BRANCH:-master} --src $HOME/origin-aggregated-logging
+#oct sync remote openshift-ansible --branch master
 oct sync local openshift-ansible --branch $ANSIBLE_BRANCH --merge-into ${ANSIBLE_BASE_BRANCH:-master} --src $HOME/openshift-ansible
 # also needs aos_cd_jobs
 oct sync remote aos-cd-jobs --branch master
@@ -115,7 +116,7 @@ cd $OS_O_A_DIR
 tito_tmp_dir="tito"
 rm -rf "\${tito_tmp_dir}"
 mkdir -p "\${tito_tmp_dir}"
-tito tag --offline --accept-auto-changelog
+tito tag --debug --offline --accept-auto-changelog
 tito build --output="\${tito_tmp_dir}" --rpm --test --offline --quiet
 createrepo "\${tito_tmp_dir}/noarch"
 cat << EOR > ./openshift-ansible-local-release.repo
@@ -132,12 +133,32 @@ ssh -n openshiftdevel "bash $runfile"
 #      title: "install the openshift-ansible release"
 #      repository: "openshift-ansible"
 cat > $runfile <<EOF
+set -x
 cd $OS_O_A_DIR
 jobs_repo=$OS_A_C_J_DIR
 last_tag="\$( git describe --tags --abbrev=0 --exact-match HEAD )"
+if [ -z "\${last_tag}" ] ; then
+   # fatal: no tag exactly matches '89c405109d8ca5906d9beb03e7e2794267f5f357'
+   last_tag="\$( git describe --tags --abbrev=0 )"
+fi
 last_commit="\$( git log -n 1 --pretty=%h )"
-sudo yum install -y "atomic-openshift-utils\${last_tag/openshift-ansible/}.git.0.\${last_commit}.el7"
-rpm -V "atomic-openshift-utils\${last_tag/openshift-ansible/}.git.0.\${last_commit}.el7"
+if sudo yum install -y "atomic-openshift-utils\${last_tag/openshift-ansible/}.git.0.\${last_commit}.el7" ; then
+   rpm -V "atomic-openshift-utils\${last_tag/openshift-ansible/}.git.0.\${last_commit}.el7"
+else
+   # for master, it looks like there is some sort of strange problem with git tags
+   # tito will give the packages a N-V-R like this:
+   # atomic-openshift-utils-3.7.0-0.134.0.git.20.186ded5.el7
+   # git describe --tags --abbrev=0 looks like this
+   # openshift-ansible-3.7.0-0.134.0
+   # git describe --tags looks like this
+   # openshift-ansible-3.7.0-0.134.0-20-g186ded5
+   # there doesn't appear to be a git describe command which will give
+   # the same result, so munge it
+   verrel=\$( git describe --tags | \
+              sed -e 's/^openshift-ansible-//' -e 's/-\([0-9][0-9]*\)-g\(..*\)\$/.git.\1.\2/' )
+   sudo yum install -y "atomic-openshift-utils-\${verrel}.el7"
+   rpm -V "atomic-openshift-utils-\${verrel}.el7"
+fi
 EOF
 scp $runfile openshiftdevel:/tmp
 ssh -n openshiftdevel "bash $runfile"
@@ -165,26 +186,34 @@ ssh -n openshiftdevel "bash $runfile"
 cat > $runfile <<EOF
 # is logging using master or a release branch?
 pushd $OS_O_A_L_DIR
-curbranch=\$( git branch | awk '/^[*]/ {print \$2}' )
+curbranch=\$( git rev-parse --abbrev-ref HEAD )
 popd
 cd $OS_ROOT
 jobs_repo=$OS_A_C_J_DIR
-if [ "\${curbranch}" = master ] ; then
+if [[ "\${curbranch}" == master ]] ; then
    git log -1 --pretty=%h >> "\${jobs_repo}/ORIGIN_COMMIT"
    ( source hack/lib/init.sh; os::build::rpm::get_nvra_vars; echo "-\${OS_RPM_VERSION}-\${OS_RPM_RELEASE}" ) >> "\${jobs_repo}/ORIGIN_PKG_VERSION"
-else
+elif [[ "\${curbranch}" =~ ^release-* ]] ; then
     pushd $OS_O_A_L_DIR
     # get repo ver from branch name
-    repover=\$( echo "\${curbranch}" | sed 's/release-//' )
+    repover=\$( echo "\${curbranch}" | sed -e 's/release-//' -e 's/[.]//' )
     # get version from tag
-    commitver=\$( git describe --tags --abbrev=0 )
+    closest_tag=\$( git describe --tags --abbrev=0 )
     # pkg ver is commitver with leading "-" instead of "v"
-    pkgver=\$( echo "\$commitver" | sed 's/^v/-/' )
-    sudo yum -y install centos-release-openshift-origin\$repover
-    echo "\${commitver}" > $OS_A_C_J_DIR/ORIGIN_COMMIT
+    pkgver=\$( echo "\${closest_tag}" | sed 's/^v/-/' )
+    # disable all of the centos repos except for the one for the
+    # version being tested - this assumes a devenv environment where
+    # all of the repos are installed
+    for repo in \$( sudo yum repolist | awk '/^centos-paas-sig-openshift-origin/ {print \$1}' ) ; do
+        case \$repo in
+        centos-paas-sig-openshift-origin\${repover}-rpms) sudo yum-config-manager --enable \$repo > /dev/null ;;
+        *) sudo yum-config-manager --disable \$repo > /dev/null ;;
+        esac
+    done
+    echo "\${closest_tag}" > $OS_A_C_J_DIR/ORIGIN_COMMIT
     echo "\${pkgver}" > $OS_A_C_J_DIR/ORIGIN_PKG_VERSION
     # disable local origin repo
-    sudo sed -i "s/enabled.*=.*1/enabled=0/" /etc/yum.repos.d/origin-local-release.repo
+    sudo yum-config-manager --disable origin-local-release > /dev/null
 fi
 EOF
 scp $runfile openshiftdevel:/tmp
@@ -223,6 +252,10 @@ ansible-playbook -vvv --become               \
   --connection local         \
   --inventory sjb/inventory/ \
   -e deployment_type=origin  \
+  -e openshift_logging_install_logging=False \
+  -e openshift_logging_install_metrics=False \
+  -e openshift_docker_log_driver=${LOG_DRIVER:-journald} \
+  -e openshift_docker_options="--log-driver=${LOG_DRIVER:-journald}" \
   -e etcd_data_dir="\${ETCD_DATA_DIR}" \
   -e openshift_pkg_version="\$( cat ./ORIGIN_PKG_VERSION )"               \
   -e oreg_url='openshift/origin-\${component}:'"\$( cat ./ORIGIN_COMMIT )" \
@@ -267,6 +300,7 @@ ansible-playbook -vv --become \
   --connection local \
   --inventory sjb/inventory/ \
   -e deployment_type=origin \
+  -e openshift_logging_install_logging=True \
   -e openshift_logging_image_prefix="openshift/origin-" \
   -e openshift_logging_kibana_hostname="$kibana_host" \
   -e openshift_logging_kibana_ops_hostname="$kibana_ops_host" \
@@ -275,6 +309,11 @@ ansible-playbook -vv --become \
   -e openshift_logging_es_hostname=${ES_HOST:-es.$fqdn} \
   -e openshift_logging_es_ops_hostname=${ES_OPS_HOST:-es-ops.$fqdn} \
   -e openshift_logging_mux_hostname=${MUX_HOST:-mux.$fqdn} \
+  -e openshift_logging_use_mux=${USE_MUX:-True} \
+  -e openshift_logging_mux_allow_external=${MUX_ALLOW_EXTERNAL:-True} \
+  -e openshift_logging_es_allow_external=${ES_ALLOW_EXTERNAL:-True} \
+  -e openshift_logging_es_ops_allow_external=${ES_OPS_ALLOW_EXTERNAL:-True} \
+  -e openshift_logging_install_eventrouter=True \
   ${EXTRA_ANSIBLE:-} \
   /usr/share/ansible/openshift-ansible/playbooks/byo/openshift-cluster/openshift-logging.yml \
   --skip-tags=update_master_config
@@ -295,7 +334,7 @@ cat > $runfile <<EOF
 sudo wget -O /usr/local/bin/stern https://github.com/wercker/stern/releases/download/1.5.1/stern_linux_amd64 && sudo chmod +x /usr/local/bin/stern
 cd $OS_O_A_L_DIR
 ${EXTRA_ENV:-}
-KUBECONFIG=/etc/origin/master/admin.kubeconfig TEST_ONLY=true \
+KUBECONFIG=/etc/origin/master/admin.kubeconfig TEST_ONLY=${TEST_ONLY:-true} \
   SKIP_TEARDOWN=true JUNIT_REPORT=true make test
 EOF
 scp $runfile openshiftdevel:/tmp
