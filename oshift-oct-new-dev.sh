@@ -59,8 +59,10 @@ source .venv/bin/activate
 NO_SKIP=1
 if [ -n "${NO_SKIP:-}" ] ; then
     if pip show origin-ci-tool > /dev/null ; then
+#        pip install --upgrade git+file://$HOME/origin-ci-tool --process-dependency-links
         pip install --upgrade git+https://github.com/openshift/origin-ci-tool.git --process-dependency-links
     else
+#        pip install git+file://$HOME/origin-ci-tool --process-dependency-links
         pip install git+https://github.com/openshift/origin-ci-tool.git --process-dependency-links
     fi
     for pkg in boto boto3 ; do
@@ -72,8 +74,12 @@ if [ -n "${NO_SKIP:-}" ] ; then
     done
     oct bootstrap self
 fi
+
+# set instance values
 oct configure aws-defaults master_security_group_ids $AWS_SECURITY_GROUPS
 oct configure aws-defaults master_instance_type $INSTANCE_TYPE
+oct configure aws-defaults master_root_volume_size ${ROOT_VOLUME_SIZE:-35}
+
 oct provision remote all-in-one --os $OS --provider aws --stage build --name $INSTNAME
 
 ip=`getremoteip`
@@ -326,6 +332,7 @@ if [ -n "${PRESERVE:-}" ] ; then
     id=$( aws ec2 --profile rh-dev describe-instances --output text --filters "Name=tag:Name,Values=$INSTNAME" --query 'Reservations[].Instances[].[InstanceId]' )
     aws ec2 --profile rh-dev create-tags --resources $id \
         --tags Key=Name,Value=${INSTNAME}-preserve
+    sed -i -e "s/${INSTNAME}/${INSTNAME}-preserve/" $HOME/.config/origin-ci-tool/inventory/ec2.ini
 fi
 
 #      title: "run logging tests"
