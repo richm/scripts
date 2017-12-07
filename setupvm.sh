@@ -409,7 +409,7 @@ has_hostname() {
 }
 
 get_next_ip() {
-    echo $1 | awk -F. '{$4 += 1;OFS=".";print}'
+    echo $1 | awk -F. '{OFS=".";$4 += 1;print}'
 }
 
 get_first_ip() {

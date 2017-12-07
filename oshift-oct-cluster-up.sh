@@ -56,14 +56,14 @@ if [ ! -d .venv ] ; then
 fi
 PS1=unused
 source .venv/bin/activate
-NO_SKIP=1
+#NO_SKIP=1
 if [ -n "${NO_SKIP:-}" ] ; then
     if pip show origin-ci-tool > /dev/null ; then
-#        pip install --upgrade git+file://$HOME/origin-ci-tool --process-dependency-links
-        pip install --upgrade git+https://github.com/openshift/origin-ci-tool.git --process-dependency-links
+        pip install --upgrade git+file://$HOME/origin-ci-tool --process-dependency-links
+#        pip install --upgrade git+https://github.com/openshift/origin-ci-tool.git --process-dependency-links
     else
-#        pip install git+file://$HOME/origin-ci-tool --process-dependency-links
-        pip install git+https://github.com/openshift/origin-ci-tool.git --process-dependency-links
+        pip install git+file://$HOME/origin-ci-tool --process-dependency-links
+#        pip install git+https://github.com/openshift/origin-ci-tool.git --process-dependency-links
     fi
     for pkg in boto boto3 ; do
         if pip show $pkg > /dev/null ; then
@@ -95,10 +95,16 @@ update_etc_hosts $ip $fqdn $kibana_host $kibana_ops_host
 #    - name: "origin-aggregated-logging"
 #    - name: "openshift-ansible"
 oct sync local origin-aggregated-logging --branch $GIT_BRANCH --merge-into ${GIT_BASE_BRANCH:-master} --src $HOME/origin-aggregated-logging
+if [ -d $HOME/origin-aggregated-logging/fluentd/jemalloc ] ; then
+    scp -r $HOME/origin-aggregated-logging/fluentd/jemalloc openshiftdevel:/data/src/github.com/openshift/origin-aggregated-logging/fluentd
+fi
+
 #oct sync remote openshift-ansible --branch master
 oct sync local openshift-ansible --branch $ANSIBLE_BRANCH --merge-into ${ANSIBLE_BASE_BRANCH:-master} --src $HOME/openshift-ansible
 # also needs aos_cd_jobs
 oct sync remote aos-cd-jobs --branch master
+
+runfile=$( mktemp )
 
 # HACK HACK HACK
 # there is a problem with the enterprise-3.3 repo:
@@ -113,67 +119,12 @@ oct sync remote aos-cd-jobs --branch master
 #        hack/build-images.sh
 ssh -n openshiftdevel "cd $OS_O_A_L_DIR; hack/build-images.sh"
 
-#      title: "build an openshift-ansible release"
-#      repository: "openshift-ansible"
-runfile=`mktemp`
-trap "rm -f $runfile" ERR EXIT INT TERM
-cat > $runfile <<EOF
-cd $OS_O_A_DIR
-tito_tmp_dir="tito"
-rm -rf "\${tito_tmp_dir}"
-mkdir -p "\${tito_tmp_dir}"
-tito tag --debug --offline --accept-auto-changelog
-tito build --output="\${tito_tmp_dir}" --rpm --test --offline --quiet
-createrepo "\${tito_tmp_dir}/noarch"
-cat << EOR > ./openshift-ansible-local-release.repo
-[openshift-ansible-local-release]
-baseurl = file://\$( pwd )/\${tito_tmp_dir}/noarch
-gpgcheck = 0
-name = OpenShift Ansible Release from Local Source
-EOR
-sudo cp ./openshift-ansible-local-release.repo /etc/yum.repos.d
-EOF
-scp $runfile openshiftdevel:/tmp
-ssh -n openshiftdevel "bash $runfile"
-
-#      title: "install the openshift-ansible release"
-#      repository: "openshift-ansible"
-cat > $runfile <<EOF
-set -x
-cd $OS_O_A_DIR
-jobs_repo=$OS_A_C_J_DIR
-last_tag="\$( git describe --tags --abbrev=0 --exact-match HEAD )"
-if [ -z "\${last_tag}" ] ; then
-   # fatal: no tag exactly matches '89c405109d8ca5906d9beb03e7e2794267f5f357'
-   last_tag="\$( git describe --tags --abbrev=0 )"
-fi
-last_commit="\$( git log -n 1 --pretty=%h )"
-if sudo yum install -y "atomic-openshift-utils\${last_tag/openshift-ansible/}.git.0.\${last_commit}.el7" ; then
-   rpm -V "atomic-openshift-utils\${last_tag/openshift-ansible/}.git.0.\${last_commit}.el7"
-else
-   # for master, it looks like there is some sort of strange problem with git tags
-   # tito will give the packages a N-V-R like this:
-   # atomic-openshift-utils-3.7.0-0.134.0.git.20.186ded5.el7
-   # git describe --tags --abbrev=0 looks like this
-   # openshift-ansible-3.7.0-0.134.0
-   # git describe --tags looks like this
-   # openshift-ansible-3.7.0-0.134.0-20-g186ded5
-   # there doesn't appear to be a git describe command which will give
-   # the same result, so munge it
-   verrel=\$( git describe --tags | \
-              sed -e 's/^openshift-ansible-//' -e 's/-\([0-9][0-9]*\)-g\(..*\)\$/.git.\1.\2/' )
-   sudo yum install -y "atomic-openshift-utils-\${verrel}.el7"
-   rpm -V "atomic-openshift-utils-\${verrel}.el7"
-fi
-EOF
-scp $runfile openshiftdevel:/tmp
-ssh -n openshiftdevel "bash $runfile"
-
-#      title: "install Ansible plugins"
+#      title: "install Ansible and plugins"
 #      repository: "origin"
 cat > $runfile <<EOF
-cd $OS_ROOT
-sudo yum install -y python-pip
+cd $OS_O_A_L_DIR
+sudo yum install -y ansible python2 python-six tar java-1.8.0-openjdk-headless httpd-tools \
+    libselinux-python python-passlib python-pip
 sudo pip install junit_xml
 sudo chmod o+rw /etc/environment
 echo "ANSIBLE_JUNIT_DIR=\$( pwd )/_output/scripts/ansible_junit" >> /etc/environment
@@ -187,97 +138,83 @@ EOF
 scp $runfile openshiftdevel:/tmp
 ssh -n openshiftdevel "bash $runfile"
 
-#      title: "determine the release commit for origin images and version for rpms"
+#      title: "prep machine to be able to run oc cluster up and run it"
 #      repository: "origin"
+# https://github.com/openshift/origin/blob/master/docs/cluster_up_down.md#overview
 cat > $runfile <<EOF
-# is logging using master or a release branch?
-pushd $OS_O_A_L_DIR
-curbranch=\$( git rev-parse --abbrev-ref HEAD )
-popd
-cd $OS_ROOT
-jobs_repo=$OS_A_C_J_DIR
-if [[ "\${curbranch}" == master ]] ; then
-   git log -1 --pretty=%h >> "\${jobs_repo}/ORIGIN_COMMIT"
-   ( source hack/lib/init.sh; os::build::rpm::get_nvra_vars; echo "-\${OS_RPM_VERSION}-\${OS_RPM_RELEASE}" ) >> "\${jobs_repo}/ORIGIN_PKG_VERSION"
-elif [[ "\${curbranch}" =~ ^release-* ]] ; then
-    pushd $OS_O_A_L_DIR
-    # get repo ver from branch name
-    repover=\$( echo "\${curbranch}" | sed -e 's/release-//' -e 's/[.]//' )
-    # get version from tag
-    closest_tag=\$( git describe --tags --abbrev=0 )
-    # pkg ver is commitver with leading "-" instead of "v"
-    pkgver=\$( echo "\${closest_tag}" | sed 's/^v/-/' )
-    # disable all of the centos repos except for the one for the
-    # version being tested - this assumes a devenv environment where
-    # all of the repos are installed
-    for repo in \$( sudo yum repolist | awk '/^centos-paas-sig-openshift-origin/ {print \$1}' ) ; do
-        case \$repo in
-        centos-paas-sig-openshift-origin\${repover}-rpms) sudo yum-config-manager --enable \$repo > /dev/null ;;
-        *) sudo yum-config-manager --disable \$repo > /dev/null ;;
-        esac
-    done
-    echo "\${closest_tag}" > $OS_A_C_J_DIR/ORIGIN_COMMIT
-    echo "\${pkgver}" > $OS_A_C_J_DIR/ORIGIN_PKG_VERSION
-    # disable local origin repo
-    sudo yum-config-manager --disable origin-local-release > /dev/null
-    # hackety hackety hack hack - pre-releases use a *wack[y]* versioning scheme
-    if sudo yum install --assumeno origin\${pkgver} 2>&1 | grep -q 'No package .* available' ; then
-        # just ask yum what the heck the version is
-        pkgver=\$( sudo yum install --assumeno origin 2>&1 | awk '\$1 == "x86_64" {print \$2}' )
-        echo "-\${pkgver}" > $OS_A_C_J_DIR/ORIGIN_PKG_VERSION
-    fi
+# 3.8 has a problem with fail-swap-on - not a valid flag
+sudo yum install -y origin-clients-3.7.0 docker /usr/bin/firewall-cmd
+sudo systemctl enable firewalld
+sudo systemctl start firewalld
+sudo sysctl -w net.ipv4.ip_forward=1
+
+# set up docker for local registry
+if ! sudo grep -q '^INSECURE_REGISTRY=' /etc/sysconfig/docker ; then
+    # not present - easy - just add it
+    echo "INSECURE_REGISTRY='--insecure-registry=172.30.0.0/16'" | sudo tee -a /etc/sysconfig/docker > /dev/null
+elif ! sudo grep -q '^INSECURE_REGISTRY=.*--insecure-registry=172.30.0.0/16' /etc/sysconfig/docker ; then
+    # already there - just add our registry - assumes 1 single line
+    sudo sed -e "/^INSECURE_REGISTRY=/s,[']$, --insecure-registry 172.30.0.0/16'," -i /etc/sysconfig/docker
 fi
+
+# set docker log driver correctly
+if ! sudo grep -q '^OPTIONS=' /etc/sysconfig/docker ; then
+    # not present - easy - just add it
+    echo "OPTIONS='--log-driver=${LOG_DRIVER:-journald}'" | sudo tee -a /etc/sysconfig/docker > /dev/null
+elif ! sudo grep -q '^OPTIONS=.*--log-driver' /etc/sysconfig/docker ; then
+    # already there - just add our value - assumes 1 single line
+    sudo sed -e "/^OPTIONS=/s,[']$, --log-driver=${LOG_DRIVER:-journald}'," -i /etc/sysconfig/docker
+else
+    # already there with value - change the value
+    sudo sed -e "/^OPTIONS=/s/--log-driver=[-_a-zA-Z0-9][-_a-zA-Z0-9]*/--log-driver=${LOG_DRIVER:-journald}/" -i /etc/sysconfig/docker
+fi
+
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+
+subnet=\$( sudo docker network inspect -f "{{range .IPAM.Config }}{{ .Subnet }}{{end}}" bridge )
+sudo firewall-cmd --permanent --new-zone dockerc
+sudo firewall-cmd --permanent --zone dockerc --add-source \$subnet
+sudo firewall-cmd --permanent --zone dockerc --add-port 8443/tcp
+sudo firewall-cmd --permanent --zone dockerc --add-port 53/udp
+sudo firewall-cmd --permanent --zone dockerc --add-port 8053/udp
+sudo firewall-cmd --reload
+metadata_endpoint="http://169.254.169.254/latest/meta-data"
+public_hostname="\$( curl -s "\${metadata_endpoint}/public-hostname" )"
+public_ip="\$( curl -s "\${metadata_endpoint}/public-ipv4" )"
+sudo oc cluster up --public-hostname="\${public_hostname}" --routing-suffix="\${public_ip}.xip.io"
+# change the config
+# allow externalIPs, and kibana UI access
+SERVER_CONFIG_DIR=/var/lib/origin/openshift.local.config
+# add loggingPublicURL so the OpenShift UI Console will include a link for Kibana
+# this part stolen from util.sh configure_os_server()
+sudo cp \${SERVER_CONFIG_DIR}/master/master-config.yaml \${SERVER_CONFIG_DIR}/master/master-config.orig.yaml
+if [ -n "${kibana_host:-}" ] ; then
+    docker exec origin openshift ex config patch \${SERVER_CONFIG_DIR}/master/master-config.orig.yaml \
+        --patch="{\"assetConfig\": {\"loggingPublicURL\": \"https://${kibana_host}\"}}" | \
+        sudo tee \${SERVER_CONFIG_DIR}/master/master-config.yaml > /dev/null
+fi
+sudo cp \${SERVER_CONFIG_DIR}/master/master-config.yaml \${SERVER_CONFIG_DIR}/master/master-config.save.yaml
+docker exec origin openshift ex config patch \${SERVER_CONFIG_DIR}/master/master-config.save.yaml \
+    --patch="{\"networkConfig\": {\"externalIPNetworkCIDRs\": [\"0.0.0.0/0\"]}}" | \
+    sudo tee \${SERVER_CONFIG_DIR}/master/master-config.yaml > /dev/null
+# restart cluster so changes will take effect
+sudo oc cluster down
+sudo systemctl restart docker
+sudo oc cluster up --use-existing-config --public-hostname="\${public_hostname}" --routing-suffix="\${public_ip}.xip.io"
 EOF
 scp $runfile openshiftdevel:/tmp
 ssh -n openshiftdevel "bash $runfile"
-
-# make etcd use a ramdisk
-cat <<SCRIPT > $runfile
-#!/bin/bash
-set -o errexit -o nounset -o pipefail -o xtrace
-cd "\${HOME}"
-sudo su root <<SUDO
-mkdir -p /tmp
-mount -t tmpfs -o size=4096m tmpfs /tmp
-mkdir -p /tmp/etcd
-chmod a+rwx /tmp/etcd
-restorecon -R /tmp
-echo "ETCD_DATA_DIR=/tmp/etcd" >> /etc/environment
-SUDO
-SCRIPT
-scp $runfile openshiftdevel:/tmp
-ssh -n openshiftdevel "bash $runfile"
-
-#      title: "install origin"
-#      repository: "aos-cd-jobs"
-cat > $runfile <<EOF
-cd $OS_A_C_J_DIR
-ansible-playbook -vvv --become               \
-  --become-user root         \
-  --connection local         \
-  --inventory sjb/inventory/ \
-  -e deployment_type=origin  \
-  /usr/share/ansible/openshift-ansible/playbooks/byo/openshift-node/network_manager.yml
-
-ansible-playbook -vvv --become               \
-  --become-user root         \
-  --connection local         \
-  --inventory sjb/inventory/ \
-  -e deployment_type=origin  \
-  -e openshift_logging_install_logging=False \
-  -e openshift_logging_install_metrics=False \
-  -e openshift_docker_log_driver=${LOG_DRIVER:-journald} \
-  -e openshift_docker_options="--log-driver=${LOG_DRIVER:-journald}" \
-  -e etcd_data_dir="\${ETCD_DATA_DIR}" \
-  -e openshift_pkg_version="\$( cat ./ORIGIN_PKG_VERSION )"               \
-  -e oreg_url='openshift/origin-\${component}:'"${OPENSHIFT_IMAGE_TAG:-\$( cat ./ORIGIN_COMMIT )}" \
-/usr/share/ansible/openshift-ansible/playbooks/byo/config.yml
-EOF
-scp $runfile openshiftdevel:/tmp
-ssh -n openshiftdevel "bash -x $runfile"
 
 #  title: "expose the kubeconfig"
 cat > $runfile <<EOF
+if [ ! -d ~/.kube ] ; then
+    mkdir ~/.kube
+fi
+sudo cp /var/lib/origin/openshift.local.config/master/admin.kubeconfig ~/.kube/config
+sudo chown \$USER ~/.kube/config
+sudo mkdir -p /etc/origin/master
+sudo cp /var/lib/origin/openshift.local.config/master/admin.kubeconfig /etc/origin/master/admin.kubeconfig
 sudo chmod a+x /etc/ /etc/origin/ /etc/origin/master/
 sudo chmod a+rw /etc/origin/master/admin.kubeconfig
 EOF
@@ -300,14 +237,25 @@ spec:
     path: ${FILE_BUFFER_PATH:-/var/lib/fluentd}
 EOF
     scp $runfile openshiftdevel:/tmp
-    ssh -n openshiftdevel "oc create --config=/etc/origin/master/admin.kubeconfig -f $runfile"
+    ssh -n openshiftdevel "oc create -f $runfile"
 fi
 
 #      title: "install origin-aggregated-logging"
 #      repository: "aos-cd-jobs"
 cat > $runfile <<EOF
 cd $OS_A_C_J_DIR
-playbook_base='/usr/share/ansible/openshift-ansible/playbooks/'
+# cannot use the networking related parameters with cluster up deployment
+if [ -f sjb/inventory/group_vars/OSEv3/general.yml ] ; then
+    sed -e '/^osm_cluster_network_cidr/d' \
+        -e '/^openshift_portal_net/d' \
+        -e '/^osm_host_subnet_length/d' \
+        -i sjb/inventory/group_vars/OSEv3/general.yml
+else
+    echo ERROR: no such file sjb/inventory/group_vars/OSEv3/general.yml
+    exit 1
+fi
+cd $OS_O_A_DIR
+playbook_base='playbooks/'
 if [[ -s "\${playbook_base}openshift-logging/config.yml" ]]; then
     playbook="\${playbook_base}openshift-logging/config.yml"
 else
@@ -316,7 +264,7 @@ fi
 ansible-playbook -vv --become \
   --become-user root \
   --connection local \
-  --inventory sjb/inventory/ \
+  --inventory $OS_A_C_J_DIR/sjb/inventory/ \
   -e deployment_type=origin \
   -e openshift_logging_install_logging=True \
   -e openshift_logging_image_prefix="openshift/origin-" \
@@ -331,11 +279,12 @@ ansible-playbook -vv --become \
   -e openshift_logging_mux_allow_external=${MUX_ALLOW_EXTERNAL:-True} \
   -e openshift_logging_es_allow_external=${ES_ALLOW_EXTERNAL:-True} \
   -e openshift_logging_es_ops_allow_external=${ES_OPS_ALLOW_EXTERNAL:-True} \
-  -e openshift_logging_install_eventrouter=True \
   ${EXTRA_ANSIBLE:-} \
   \${playbook} \
   --skip-tags=update_master_config
 EOF
+# richm 20171204 - problem with too much recursion with this role?
+#  -e openshift_logging_install_eventrouter=True \
 cat $runfile
 scp $runfile openshiftdevel:/tmp
 ssh -n openshiftdevel "bash $runfile"
