@@ -251,14 +251,25 @@ ssh -n openshiftdevel "bash $runfile"
 #      title: "install origin"
 #      repository: "aos-cd-jobs"
 cat > $runfile <<EOF
+playbook_base='/usr/share/ansible/openshift-ansible/playbooks/'
+if [[ -s "\${playbook_base}/openshift-node/network_manager.yml" ]]; then
+    playbook="\${playbook_base}openshift-node/network_manager.yml"
+else
+    playbook="\${playbook_base}byo/openshift-node/network_manager.yml"
+fi
 cd $OS_A_C_J_DIR
 ansible-playbook -vvv --become               \
   --become-user root         \
   --connection local         \
   --inventory sjb/inventory/ \
   -e deployment_type=origin  \
-  /usr/share/ansible/openshift-ansible/playbooks/byo/openshift-node/network_manager.yml
+  \${playbook}
 
+if [[ -s "\${playbook_base}deploy_cluster.yml" ]]; then
+    playbook="\${playbook_base}deploy_cluster.yml"
+else
+    playbook="\${playbook_base}byo/config.yml"
+fi
 ansible-playbook -vvv --become               \
   --become-user root         \
   --connection local         \
@@ -271,7 +282,7 @@ ansible-playbook -vvv --become               \
   -e etcd_data_dir="\${ETCD_DATA_DIR}" \
   -e openshift_pkg_version="\$( cat ./ORIGIN_PKG_VERSION )"               \
   -e oreg_url='openshift/origin-\${component}:'"${OPENSHIFT_IMAGE_TAG:-\$( cat ./ORIGIN_COMMIT )}" \
-/usr/share/ansible/openshift-ansible/playbooks/byo/config.yml
+  \${playbook}
 EOF
 scp $runfile openshiftdevel:/tmp
 ssh -n openshiftdevel "bash -x $runfile"
