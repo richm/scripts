@@ -251,13 +251,23 @@ ssh -n openshiftdevel "bash $runfile"
 #      title: "install origin"
 #      repository: "aos-cd-jobs"
 cat > $runfile <<EOF
+cd $OS_A_C_J_DIR
+if [ -f /usr/share/ansible/openshift-ansible/playbooks/prerequisites.yml ] ; then
+    ansible-playbook -vv --become               \
+                        --become-user root         \
+                        --connection local         \
+                        --inventory sjb/inventory/ \
+                        -e containerized=true      \
+                        -e deployment_type=origin  \
+                        /usr/share/ansible/openshift-ansible/playbooks/prerequisites.yml
+fi
+
 playbook_base='/usr/share/ansible/openshift-ansible/playbooks/'
 if [[ -s "\${playbook_base}/openshift-node/network_manager.yml" ]]; then
     playbook="\${playbook_base}openshift-node/network_manager.yml"
 else
     playbook="\${playbook_base}byo/openshift-node/network_manager.yml"
 fi
-cd $OS_A_C_J_DIR
 ansible-playbook -vvv --become               \
   --become-user root         \
   --connection local         \
