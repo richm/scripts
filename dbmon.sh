@@ -259,6 +259,7 @@ parseldif() {
 
 dodbmon() {
     headers=${HEADERS:-yes}
+    elapsed=0
     while [ 1 ] ; do
         if [ "$FORMAT" = "default" ] ; then
             date
@@ -269,6 +270,10 @@ dodbmon() {
         headers=no
         if [ "$FORMAT" = "default" ] ; then
             echo ""
+        fi
+        elapsed=$( expr $elapsed + $INCR )
+        if [ $DURATION -eq 0 -o $elapsed -ge $DURATION ] ; then
+            break
         fi
         sleep $INCR
     done
