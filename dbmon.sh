@@ -257,6 +257,34 @@ parseldif() {
         '
 }
 
+allowAnonAccess() {
+    ldapmodify -x -h $HOST -p $PORT -D "$BINDDN" -w "$BINDPW" <<EOF
+dn: $ldbmdn
+changetype: modify
+add: aci
+aci: (targetattr = "*")(targetfilter = "(|(cn=config)(cn=database)(cn=monitor))")(version 3.0; acl "allow anon access for db cache monitor"
+ ; allow (read,search) userdn = "ldap:///anyone";)
+EOF
+}
+
+allowMonitorUserAccess() {
+    ldapmodify -x -h $HOST -p $PORT -D "$BINDDN" -w "$BINDPW" <<EOF
+dn: $ldbmdn
+changetype: modify
+add: aci
+aci: (targetattr = "*")(targetfilter = "(|(cn=config)(cn=database)(cn=monitor))")(version 3.0; acl "allow monitor user access for db cache monitor"
+ ; allow (read,search) userdn = "ldap:///$1";)
+EOF
+}
+
+ldsrch() {
+    if [ -n "${ANON:-}" ] ; then
+        ldapsearch -xLLL -h $HOST -p $PORT -b "$ldbmdn" '(|(cn=config)(cn=database)(cn=monitor))'
+    else
+        ldapsearch -xLLL -h $HOST -p $PORT -D "$BINDDN" -w "$BINDPW" -b "$ldbmdn" '(|(cn=config)(cn=database)(cn=monitor))'
+    fi
+}
+
 dodbmon() {
     headers=${HEADERS:-yes}
     elapsed=0
@@ -265,8 +293,7 @@ dodbmon() {
             date
         fi
         ts=$( date +%Y-%m-%dT%H:%M:%S.%6N )
-        ldapsearch -xLLL -h $HOST -p $PORT -D "$BINDDN" -w "$BINDPW" -b "$ldbmdn" '(|(cn=config)(cn=database)(cn=monitor))' \
-        | parseldif $ts $headers
+        ldsrch | parseldif $ts $headers
         headers=no
         if [ "$FORMAT" = "default" ] ; then
             echo ""
