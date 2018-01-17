@@ -9,9 +9,14 @@ BINDPW=${BINDPW:-"secret"}
 DBLIST=${DBLIST:-all}
 ldbmdn="cn=ldbm database,cn=plugins,cn=config"
 VERBOSE=${VERBOSE:-0}
+FORMAT=${FORMAT:-default}
+DELIMITER=${DELIMITER:-" "}
+# format column - prints all data as single line, first line is column header
+#   column uses space as delimiter - can specify DELIMITER for e.g. CSV output
+# format keyvalue - prints all data as single line in format KEY=VALUE
 
 parseldif() {
-    awk -v dblist="$DBLIST" -v verbose=$VERBOSE -v indexlist="$INDEXLIST" -F '[:,= ]+' '
+    awk -v delimiter="$DELIMITER" -v format=$FORMAT -v headers="${2:-no}" -v ts="$1" -v dblist="$DBLIST" -v verbose=$VERBOSE -v indexlist="$INDEXLIST" -F '[:,= ]+' '
         function printary(ary) {
             for (ii in ary) { print ii, "=", ary[ii] }
         }
@@ -95,6 +100,7 @@ parseldif() {
         END {
             free=(dbcachesize-(pagesize*dbpages))
             freeratio=free/dbcachesize
+            freepct=sprintf("%.1f", freeratio*100)
             if (verbose > 1) {
                 print "# dbcachefree - free bytes in dbcache"
                 print "# free% - percent free in dbcache"
@@ -104,7 +110,9 @@ parseldif() {
                 print "# pagein - number of pages read into the cache"
                 print "# pageout - number of pages dropped from the cache"
             }
-            print "dbcachefree", free, "free%", (freeratio*100), "roevicts", dbroevict, "hit%", dbhitratio, "pagein", dbcachepagein, "pageout", dbcachepageout
+            if (format == "default") {
+                print "dbcachefree", free, "free%", freepct, "roevicts", dbroevict, "hit%", dbhitratio, "pagein", dbcachepagein, "pageout", dbcachepageout
+            }
             if (verbose > 1) {
                 print "# dbname - name of database instance - the row shows the entry cache stats"
                 print "# count - number of entries in cache"
@@ -132,51 +140,136 @@ parseldif() {
                 maxdbnamelen = 6
             }
 
-            if (verbose > 0) {
-                fmtstr = sprintf("%%%d.%ds %%10.10s %%13.13s %%6.6s %%7.7s\n", maxdbnamelen, maxdbnamelen)
-                printf fmtstr, "dbname", "count", "free", "free%", "size"
-            }
-            for (dbn in dbnames) {
-                cur=stats[dbn,"entcur"]
-                max=stats[dbn,"entmax"]
-                cnt=stats[dbn,"entcnt"]
-                free=max-cur
-                freep=free/max*100
-                size=(cnt == 0) ? 0 : cur/cnt
-                fmtstr = sprintf("%%%d.%ds %%10d %%13d %%6.1f %%7.1f\n", maxdbnamelen, maxdbnamelen)
-                printf fmtstr, dbnames[dbn] dbentext, cnt, free, freep, size
-                if (havednstats) {
-                    dcur=stats[dbn,"dncur"]
-                    dmax=stats[dbn,"dnmax"]
-                    dcnt=stats[dbn,"dncnt"]
-                    dfree=dmax-dcur
-                    dfreep=dfree/dmax*100
-                    dsize=(dcnt == 0) ? 0 : dcur/dcnt
-                    printf fmtstr, dbnames[dbn] dbdnext, dcnt, dfree, dfreep, dsize
+            if (format == "default") {
+                if (verbose > 0) {
+                    fmtstr = sprintf("%%%d.%ds %%10.10s %%13.13s %%6.6s %%7.7s\n", maxdbnamelen, maxdbnamelen)
+                    printf fmtstr, "dbname", "count", "free", "free%", "size"
                 }
-                if (indexlist) {
-                    len = idxmaxlen[dbn]
-                    fmtstr = sprintf("%%%d.%ds %%%d.%ds pagein %%8d pageout %%8d\n", maxdbnamelen, maxdbnamelen, len, len)
-                    for (idx in idxnames) {
-                        ipi = idxstats[dbn,idx,"pagein"]
-                        ipo = idxstats[dbn,idx,"pageout"]
-                        # not every db will have every index
-                        if (ipi != "" && ipo != "") {
-                            printf fmtstr, "+", idxnames[idx], ipi, ipo
+                for (dbn in dbnames) {
+                    cur=stats[dbn,"entcur"]
+                    max=stats[dbn,"entmax"]
+                    cnt=stats[dbn,"entcnt"]
+                    free=max-cur
+                    freep=free/max*100
+                    size=(cnt == 0) ? 0 : cur/cnt
+                    fmtstr = sprintf("%%%d.%ds %%10d %%13d %%6.1f %%7.1f\n", maxdbnamelen, maxdbnamelen)
+                    printf fmtstr, dbnames[dbn] dbentext, cnt, free, freep, size
+                    if (havednstats) {
+                        dcur=stats[dbn,"dncur"]
+                        dmax=stats[dbn,"dnmax"]
+                        dcnt=stats[dbn,"dncnt"]
+                        dfree=dmax-dcur
+                        dfreep=dfree/dmax*100
+                        dsize=(dcnt == 0) ? 0 : dcur/dcnt
+                        printf fmtstr, dbnames[dbn] dbdnext, dcnt, dfree, dfreep, dsize
+                    }
+                    if (indexlist) {
+                        len = idxmaxlen[dbn]
+                        fmtstr = sprintf("%%%d.%ds %%%d.%ds pagein %%8d pageout %%8d\n", maxdbnamelen, maxdbnamelen, len, len)
+                        for (idx in idxnames) {
+                            ipi = idxstats[dbn,idx,"pagein"]
+                            ipo = idxstats[dbn,idx,"pageout"]
+                            # not every db will have every index
+                            if (ipi != "" && ipo != "") {
+                                printf fmtstr, "+", idxnames[idx], ipi, ipo
+                            }
                         }
                     }
                 }
+            }
+            if (format == "column") {
+                if (headers != "no") {
+                    headerstr="timestamp" delimiter "db:free" delimiter "db:freepct" delimiter "db:roevicts" delimiter "db:hitratio" delimiter "db:cachepagein" delimiter "db:cachepageout"
+                    for (dbn in dbnames) {
+                        headerstr=headerstr delimiter dbn ":ent:entries" delimiter dbn ":ent:freebytes" delimiter dbn ":ent:freepct" delimiter dbn ":ent:entrysize"
+                        if (havednstats) {
+                            headerstr=headerstr delimiter dbn ":dn:entries" delimiter dbn ":dn:freebytes" delimiter dbn ":dn:freepct" delimiter dbn ":dn:entrysize"
+                        }
+                    }
+                    print headerstr
+                }
+                datastr=ts delimiter free delimiter freepct delimiter dbroevict delimiter dbhitratio delimiter dbcachepagein delimiter dbcachepageout
+                for (dbn in dbnames) {
+                    cur=stats[dbn,"entcur"]
+                    max=stats[dbn,"entmax"]
+                    cnt=stats[dbn,"entcnt"]
+                    free=max-cur
+                    freep=sprintf("%.1f", free/max*100)
+                    size=(cnt == 0) ? "0" : sprintf("%.1f", cur/cnt)
+                    datastr=datastr delimiter cnt delimiter free delimiter freep delimiter size
+                    if (havednstats) {
+                        dcur=stats[dbn,"dncur"]
+                        dmax=stats[dbn,"dnmax"]
+                        dcnt=stats[dbn,"dncnt"]
+                        dfree=dmax-dcur
+                        dfreep=sprintf("%.1f", dfree/dmax*100)
+                        dsize=(dcnt == 0) ? "0" : sprintf("%.1f", dcur/dcnt)
+                        datastr=datastr delimiter dcnt delimiter dfree delimiter dfreep delimiter dsize
+                    }
+                }
+                print datastr
+            }
+            if (format == "keyvalue") {
+                datastr="timestamp=" ts " db:free=" free " db:freepct=" freepct " db:roevicts=" dbroevict " db:hitratio=" dbhitratio " db:cachepagein=" dbcachepagein " db:cachepageout=" dbcachepageout
+                for (dbn in dbnames) {
+                    cur=stats[dbn,"entcur"]
+                    max=stats[dbn,"entmax"]
+                    cnt=stats[dbn,"entcnt"]
+                    free=max-cur
+                    freep=sprintf("%.1f", free/max*100)
+                    size=(cnt == 0) ? "0" : sprintf("%.1f", cur/cnt)
+                    datastr=datastr " " dbn ":ent:entries=" cnt " " dbn ":ent:freebytes=" free " " dbn ":ent:freepct=" freep " " dbn ":ent:entrysize=" size
+                    if (havednstats) {
+                        dcur=stats[dbn,"dncur"]
+                        dmax=stats[dbn,"dnmax"]
+                        dcnt=stats[dbn,"dncnt"]
+                        dfree=dmax-dcur
+                        dfreep=sprintf("%.1f", dfree/dmax*100)
+                        dsize=(dcnt == 0) ? "0" : sprintf("%.1f", dcur/dcnt)
+                        datastr=datastr " " dbn ":dn:entries=" dcnt " " dbn ":dn:freebytes=" dfree " " dbn ":dn:freepct=" dfreep " " dbn ":dn:entrysize=" dsize
+                    }
+                }
+                print datastr
+            }
+            if (format == "json") {
+                datastr="{\"timestamp\":\"" ts "\",\"db:free\":" free ",\"db:freepct\":" freepct ",\"db:roevicts\":" dbroevict ",\"db:hitratio\":" dbhitratio ",\"db:cachepagein\":" dbcachepagein ",\"db:cachepageout\":" dbcachepageout
+                for (dbn in dbnames) {
+                    cur=stats[dbn,"entcur"]
+                    max=stats[dbn,"entmax"]
+                    cnt=stats[dbn,"entcnt"]
+                    free=max-cur
+                    freep=sprintf("%.1f", free/max*100)
+                    size=(cnt == 0) ? "0" : sprintf("%.1f", cur/cnt)
+                    datastr=datastr ",\"" dbn ":ent:entries\":" cnt ",\"" dbn ":ent:freebytes\":" free ",\"" dbn ":ent:freepct\":" freep ",\"" dbn ":ent:entrysize\":" size
+                    if (havednstats) {
+                        dcur=stats[dbn,"dncur"]
+                        dmax=stats[dbn,"dnmax"]
+                        dcnt=stats[dbn,"dncnt"]
+                        dfree=dmax-dcur
+                        dfreep=sprintf("%.1f", dfree/dmax*100)
+                        dsize=(dcnt == 0) ? "0" : sprintf("%.1f", dcur/dcnt)
+                        datastr=datastr ",\"" dbn ":dn:entries\":" dcnt ",\"" dbn ":dn:freebytes\":" dfree ",\"" dbn ":dn:freepct\":" dfreep ",\"" dbn ":dn:entrysize\":" dsize
+                    }
+                }
+                print datastr "}"
             }
         }
         '
 }
 
 dodbmon() {
+    headers=${HEADERS:-yes}
     while [ 1 ] ; do
-        date
+        if [ "$FORMAT" = "default" ] ; then
+            date
+        fi
+        ts=$( date +%Y-%m-%dT%H:%M:%S.%6N )
         ldapsearch -xLLL -h $HOST -p $PORT -D "$BINDDN" -w "$BINDPW" -b "$ldbmdn" '(|(cn=config)(cn=database)(cn=monitor))' \
-        | parseldif
-        echo ""
+        | parseldif $ts $headers
+        headers=no
+        if [ "$FORMAT" = "default" ] ; then
+            echo ""
+        fi
         sleep $INCR
     done
 }
