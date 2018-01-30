@@ -51,13 +51,14 @@ INSTNAME=${INSTNAME:-origin_$USER-$TESTNAME-$OS-1}
 pushd $HOME/origin-aggregated-logging
 
 # https://github.com/openshift/origin-ci-tool#installation
+NO_SKIP=${NO_SKIP:-0}
 if [ ! -d .venv ] ; then
     virtualenv .venv --system-site-packages
+    NO_SKIP=1
 fi
 PS1=unused
 source .venv/bin/activate
-NO_SKIP=1
-if [ -n "${NO_SKIP:-}" ] ; then
+if [ "${NO_SKIP:-0}" = 1 ] ; then
     if pip show origin-ci-tool > /dev/null ; then
 #        pip install --upgrade git+file://$HOME/origin-ci-tool --process-dependency-links
         pip install --upgrade git+https://github.com/openshift/origin-ci-tool.git --process-dependency-links
@@ -267,14 +268,16 @@ ssh -n openshiftdevel "bash $runfile"
 #      title: "install origin"
 #      repository: "aos-cd-jobs"
 cat > $runfile <<EOF
+set -x
 cd $OS_A_C_J_DIR
 if [ -f /usr/share/ansible/openshift-ansible/playbooks/prerequisites.yml ] ; then
     ansible-playbook -vv --become               \
                         --become-user root         \
                         --connection local         \
                         --inventory sjb/inventory/ \
-                        -e containerized=true      \
                         -e deployment_type=origin  \
+                        -e openshift_docker_log_driver=${LOG_DRIVER:-journald} \
+                        -e openshift_docker_options="--log-driver=${LOG_DRIVER:-journald}" \
                         /usr/share/ansible/openshift-ansible/playbooks/prerequisites.yml
 fi
 
@@ -289,6 +292,8 @@ ansible-playbook -vvv --become               \
   --connection local         \
   --inventory sjb/inventory/ \
   -e deployment_type=origin  \
+  -e openshift_docker_log_driver=${LOG_DRIVER:-journald} \
+  -e openshift_docker_options="--log-driver=${LOG_DRIVER:-journald}" \
   \${playbook}
 
 if [[ -s "\${playbook_base}deploy_cluster.yml" ]]; then
