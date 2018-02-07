@@ -299,7 +299,7 @@ dodbmon() {
             echo ""
         fi
         elapsed=$( expr $elapsed + $INCR )
-        if [ $DURATION -eq 0 -o $elapsed -ge $DURATION ] ; then
+        if [ $DURATION -ne 0 -a $elapsed -ge $DURATION ] ; then
             break
         fi
         sleep $INCR
