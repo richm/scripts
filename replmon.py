@@ -3,6 +3,7 @@ import sys
 import time
 import ldap
 from dsadmin import DSAdmin, Entry
+from dsadmin_utils import normalizeDN
 from argparse import ArgumentParser
 
 parser = ArgumentParser()
@@ -53,8 +54,9 @@ for ii in range(0, len(args.H)):
         filt = '(nsds5replicaroot=' + suf + ')'
         agmts = conn.findAgreementDNs(filt)
         if not agmts:
-            raise Exception("error: server " + str(conn) + " has no agreements for suffix " + suf)
-        suffixes[DSAdmin.normalizeDN(suf)] = suf
+#            raise Exception("error: server " + str(conn) + " has no agreements for suffix " + suf)
+            print("error: server " + str(conn) + " has no agreements for suffix " + suf + " probably a consumer")
+        suffixes[normalizeDN(suf)] = suf
         for agmt in agmts:
             conn.lastnumchanges[agmt] = 0
 
