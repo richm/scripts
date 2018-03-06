@@ -96,8 +96,12 @@ update_etc_hosts $ip $fqdn $kibana_host $kibana_ops_host
 #    - name: "origin-aggregated-logging"
 #    - name: "openshift-ansible"
 oct sync local origin-aggregated-logging --branch $GIT_BRANCH --merge-into ${GIT_BASE_BRANCH:-master} --src $HOME/origin-aggregated-logging
+# seems to be a bug currently - doesn't checkout branch other than master - so force it to make sure
+ssh -n openshiftdevel "cd $OS_O_A_L_DIR; git checkout ${GIT_BASE_BRANCH:-master}"
 #oct sync remote openshift-ansible --branch master
 oct sync local openshift-ansible --branch $ANSIBLE_BRANCH --merge-into ${ANSIBLE_BASE_BRANCH:-master} --src $HOME/openshift-ansible
+# seems to be a bug currently - doesn't checkout branch other than master - so force it to make sure
+ssh -n openshiftdevel "cd $OS_O_A_DIR; git checkout ${ANSIBLE_BASE_BRANCH:-master}"
 # also needs aos_cd_jobs
 oct sync remote aos-cd-jobs --branch master
 
@@ -112,18 +116,31 @@ oct sync remote aos-cd-jobs --branch master
 #      repository: "origin-aggregated-logging"
 #      script: |-
 #        hack/build-images.sh
-ssh -n openshiftdevel "cd $OS_O_A_L_DIR; hack/build-images.sh"
+if [ "${USE_LOGGING:-true}" = true -a "${BUILD_IMAGES:-true}" = true ] ; then
+    ssh -n openshiftdevel "cd $OS_O_A_L_DIR; hack/build-images.sh"
+fi
 
 #      title: "build an openshift-ansible release"
 #      repository: "openshift-ansible"
 runfile=`mktemp`
 trap "rm -f $runfile" ERR EXIT INT TERM
 cat > $runfile <<EOF
+set -euxo pipefail
 cd $OS_O_A_DIR
 tito_tmp_dir="tito"
 rm -rf "\${tito_tmp_dir}"
 mkdir -p "\${tito_tmp_dir}"
-tito tag --debug --offline --accept-auto-changelog
+titotagtmp=\$( mktemp )
+if tito tag --debug --offline --accept-auto-changelog > \$titotagtmp 2>&1 ; then
+    cat \$titotagtmp
+elif grep -q "Tag openshift-ansible.* already exists" \$titotagtmp ; then
+    cat \$titotagtmp
+else
+    cat \$titotagtmp
+    rm -f \$titotagtmp
+    exit 1
+fi
+rm -f \$titotagtmp
 tito build --output="\${tito_tmp_dir}" --rpm --test --offline --quiet
 createrepo "\${tito_tmp_dir}/noarch"
 cat << EOR > ./openshift-ansible-local-release.repo
@@ -140,7 +157,13 @@ ssh -n openshiftdevel "bash $runfile"
 #      title: "install the openshift-ansible release"
 #      repository: "openshift-ansible"
 cat > $runfile <<EOF
-set -x
+set -euxo pipefail
+pushd $OS_O_A_L_DIR > /dev/null
+curbranch=\$( git rev-parse --abbrev-ref HEAD )
+popd > /dev/null
+if [[ "\${curbranch}" == release-3.7 || "\${curbranch}" == release-3.6 ]] ; then
+    sudo yum downgrade -y ansible-2.3\*
+fi
 cd $OS_O_A_DIR
 jobs_repo=$OS_A_C_J_DIR
 last_tag="\$( git describe --tags --abbrev=0 --exact-match HEAD )"
@@ -173,6 +196,7 @@ ssh -n openshiftdevel "bash $runfile"
 #      title: "install Ansible plugins"
 #      repository: "origin"
 cat > $runfile <<EOF
+set -euxo pipefail
 cd $OS_ROOT
 sudo yum install -y python-pip
 sudo pip install junit_xml
@@ -191,6 +215,7 @@ ssh -n openshiftdevel "bash $runfile"
 #      title: "determine the release commit for origin images and version for rpms"
 #      repository: "origin"
 cat > $runfile <<EOF
+set -euxo pipefail
 # is logging using master or a release branch?
 pushd $OS_O_A_L_DIR
 curbranch=\$( git rev-parse --abbrev-ref HEAD )
@@ -222,6 +247,24 @@ elif [[ "\${curbranch}" =~ ^release-* ]] ; then
             sudo yum-config-manager --disable \$repo > /dev/null ;;
         esac
     done
+    if [[ "\${foundrepover:-false}" == false ]] ; then
+        # see if there is a repo for this version that is available on the external
+        # site but not yet configured as a local yum repo
+        respcode=\$( curl -L -s -XHEAD -w '%{response_code}\n' http://cbs.centos.org/repos/paas7-openshift-origin\${repover}-candidate/x86_64/os/repodata )
+        if [[ "\${respcode}" == "200" ]] ; then
+            cat <<EOF2 | sudo tee /etc/yum.repos.d/centos-paas-sig-openshift-origin\${repover}-rpms.repo
+[centos-paas-sig-openshift-origin\${repover}-rpms]
+baseurl = https://buildlogs.centos.org/centos/7/paas/x86_64/openshift-origin\${repover}/
+gpgcheck = 0
+name = CentOS PaaS SIG Origin \${repover} Repository
+sslclientcert = /var/lib/yum/client-cert.pem
+sslclientkey = /var/lib/yum/client-key.pem
+sslverify = 0
+enabled = 1
+EOF2
+            foundrepover=true # found a repo for this version
+        fi
+    fi
     # disable local origin repo if foundrepover is true - else, we do not have
     # a release specific repo, use origin-local-release
     if [[ "\${foundrepover:-false}" == true ]] ; then
@@ -236,11 +279,17 @@ elif [[ "\${curbranch}" =~ ^release-* ]] ; then
             echo package origin\${pkgver} is available
         fi
     else # use latest on machine
-        pushd $OS_O_A_DIR
+        pushd $OS_ROOT > /dev/null
         git log -1 --pretty=%h >> "\${jobs_repo}/ORIGIN_COMMIT"
         ( source hack/lib/init.sh; os::build::rpm::get_nvra_vars; echo "-\${OS_RPM_VERSION}-\${OS_RPM_RELEASE}" ) >> "\${jobs_repo}/ORIGIN_PKG_VERSION"
-        popd
+        ( source hack/lib/init.sh; os::build::rpm::get_nvra_vars; echo "\${OS_GIT_MAJOR}.\${OS_GIT_MINOR}" | sed "s/+//" ) >> "\${jobs_repo}/ORIGIN_RELEASE"
+        popd > /dev/null
     fi
+    # build our release deps package
+    rpmbuild -ba $OS_O_A_L_DIR/hack/branch-deps.spec
+    # downgrade/erase troublesome packages
+    sudo yum -y downgrade docker-1.12\* docker-client-1.12\* docker-common-1.12\* docker-rhel-push-plugin-1.12\* skopeo-0.1.27\* skopeo-containers-0.1.27\*
+    sudo yum -y install \$HOME/rpmbuild/RPMS/noarch/branch-deps-*.noarch.rpm
 else
     echo Error: unknown base branch \$curbranch: please resubmit PR on master or a release-x.y branch
 fi
@@ -250,6 +299,7 @@ ssh -n openshiftdevel "bash $runfile"
 
 # make etcd use a ramdisk
 cat <<SCRIPT > $runfile
+set -euxo pipefail
 #!/bin/bash
 set -o errexit -o nounset -o pipefail -o xtrace
 cd "\${HOME}"
@@ -268,7 +318,7 @@ ssh -n openshiftdevel "bash $runfile"
 #      title: "install origin"
 #      repository: "aos-cd-jobs"
 cat > $runfile <<EOF
-set -x
+set -euxo pipefail
 cd $OS_A_C_J_DIR
 if [ -f /usr/share/ansible/openshift-ansible/playbooks/prerequisites.yml ] ; then
     ansible-playbook -vv --become               \
@@ -320,40 +370,60 @@ ssh -n openshiftdevel "bash -x $runfile"
 
 #  title: "expose the kubeconfig"
 cat > $runfile <<EOF
+set -euxo pipefail
 sudo chmod a+x /etc/ /etc/origin/ /etc/origin/master/
 sudo chmod a+rw /etc/origin/master/admin.kubeconfig
+if [ ! -d ~/.kube ] ; then
+    mkdir ~/.kube
+fi
+cp /etc/origin/master/admin.kubeconfig ~/.kube/config
 EOF
 scp $runfile openshiftdevel:/tmp
 ssh -n openshiftdevel "bash $runfile"
 
-# HACK - create mux pvc
-if [ "${MUX_FILE_BUFFER_STORAGE_TYPE:-}" = pvc ] ; then
-    cat > $runfile <<EOF
+if [ "${USE_LOGGING:-true}" = true ] ; then
+    # HACK - create mux pvc
+    if [ "${MUX_FILE_BUFFER_STORAGE_TYPE:-}" = pvc ] ; then
+        cat > $runfile <<EOF
 apiVersion: "v1"
 kind: "PersistentVolume"
 metadata:
-  name: logging-muxpv-1
+name: logging-muxpv-1
 spec:
-  capacity:
+capacity:
     storage: "6Gi"
-  accessModes:
+accessModes:
     - "ReadWriteOnce"
-  hostPath:
+hostPath:
     path: ${FILE_BUFFER_PATH:-/var/lib/fluentd}
 EOF
-    scp $runfile openshiftdevel:/tmp
-    ssh -n openshiftdevel "oc create --config=/etc/origin/master/admin.kubeconfig -f $runfile"
+        scp $runfile openshiftdevel:/tmp
+        ssh -n openshiftdevel "oc create --config=/etc/origin/master/admin.kubeconfig -f $runfile"
+    fi
 fi
 
 #      title: "install origin-aggregated-logging"
 #      repository: "aos-cd-jobs"
-cat > $runfile <<EOF
+if [ "${USE_LOGGING:-true}" = true ] ; then
+    cat > $runfile <<EOF
+set -euxo pipefail
 cd $OS_A_C_J_DIR
 playbook_base='/usr/share/ansible/openshift-ansible/playbooks/'
 if [[ -s "\${playbook_base}openshift-logging/config.yml" ]]; then
     playbook="\${playbook_base}openshift-logging/config.yml"
 else
     playbook="\${playbook_base}byo/openshift-cluster/openshift-logging.yml"
+fi
+pushd "$OS_O_A_L_DIR"
+curbranch=\$( git rev-parse --abbrev-ref HEAD )
+popd
+logging_extras=""
+if [[ "\$curbranch" == es5.x ]]; then
+    logging_extras="\${logging_extras} -e openshift_logging_es5_techpreview=True \
+                    -e openshift_logging_image_version=latest"
+elif [[ "\${curbranch}" == master ]]; then
+    # force image version/tag to be latest, otherwise it will use openshift_tag_version
+    logging_extras="\${logging_extras} -e openshift_logging_image_version=latest"
 fi
 ansible-playbook -vv --become \
   --become-user root \
@@ -373,14 +443,15 @@ ansible-playbook -vv --become \
   -e openshift_logging_mux_allow_external=${MUX_ALLOW_EXTERNAL:-True} \
   -e openshift_logging_es_allow_external=${ES_ALLOW_EXTERNAL:-True} \
   -e openshift_logging_es_ops_allow_external=${ES_OPS_ALLOW_EXTERNAL:-True} \
-  -e openshift_logging_install_eventrouter=True \
-  ${EXTRA_ANSIBLE:-} \
+  ${EXTRA_ANSIBLE:-} \${logging_extras} \
   \${playbook} \
   --skip-tags=update_master_config
 EOF
-cat $runfile
-scp $runfile openshiftdevel:/tmp
-ssh -n openshiftdevel "bash $runfile"
+#  -e openshift_logging_install_eventrouter=True \
+    cat $runfile
+    scp $runfile openshiftdevel:/tmp
+    ssh -n openshiftdevel "bash $runfile"
+fi
 
 if [ -n "${PRESERVE:-}" ] ; then
     id=$( aws ec2 --profile rh-dev describe-instances --output text --filters "Name=tag:Name,Values=$INSTNAME" --query 'Reservations[].Instances[].[InstanceId]' )
@@ -391,14 +462,16 @@ fi
 
 #      title: "run logging tests"
 #      repository: "origin-aggregated-logging"
-cat > $runfile <<EOF
+if [ "${USE_LOGGING:-true}" = true ] ; then
+    cat > $runfile <<EOF
 sudo wget -O /usr/local/bin/stern https://github.com/wercker/stern/releases/download/1.5.1/stern_linux_amd64 && sudo chmod +x /usr/local/bin/stern
 cd $OS_O_A_L_DIR
 ${EXTRA_ENV:-}
 KUBECONFIG=/etc/origin/master/admin.kubeconfig TEST_ONLY=${TEST_ONLY:-true} \
   SKIP_TEARDOWN=true JUNIT_REPORT=true make test
 EOF
-scp $runfile openshiftdevel:/tmp
-ssh -n openshiftdevel "bash $runfile"
+    scp $runfile openshiftdevel:/tmp
+    ssh -n openshiftdevel "bash $runfile"
+fi
 
 echo use \"oct deprovision\" when you are done
