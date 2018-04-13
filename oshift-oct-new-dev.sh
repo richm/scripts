@@ -161,8 +161,11 @@ set -euxo pipefail
 pushd $OS_O_A_L_DIR > /dev/null
 curbranch=\$( git rev-parse --abbrev-ref HEAD )
 popd > /dev/null
-if [[ "\${curbranch}" == release-3.7 || "\${curbranch}" == release-3.6 ]] ; then
+if [[ "\${curbranch}" == release-3.7 || "\${curbranch}" == release-3.6 || "\${curbranch}" == release-3.5 ]] ; then
     sudo yum downgrade -y ansible-2.3\*
+    oapkg=atomic-openshift-utils
+else
+    oapkg=openshift-ansible
 fi
 cd $OS_O_A_DIR
 jobs_repo=$OS_A_C_J_DIR
@@ -172,8 +175,8 @@ if [ -z "\${last_tag}" ] ; then
    last_tag="\$( git describe --tags --abbrev=0 )"
 fi
 last_commit="\$( git log -n 1 --pretty=%h )"
-if sudo yum install -y "atomic-openshift-utils\${last_tag/openshift-ansible/}.git.0.\${last_commit}.el7" ; then
-   rpm -V "atomic-openshift-utils\${last_tag/openshift-ansible/}.git.0.\${last_commit}.el7"
+if sudo yum install -y "\${oapkg}\${last_tag/openshift-ansible/}.git.0.\${last_commit}.el7" ; then
+   rpm -V "\${oapkg}\${last_tag/openshift-ansible/}.git.0.\${last_commit}.el7"
 else
    # for master, it looks like there is some sort of strange problem with git tags
    # tito will give the packages a N-V-R like this:
@@ -186,8 +189,8 @@ else
    # the same result, so munge it
    verrel=\$( git describe --tags | \
               sed -e 's/^openshift-ansible-//' -e 's/-\([0-9][0-9]*\)-g\(..*\)\$/.git.\1.\2/' )
-   sudo yum install -y "atomic-openshift-utils-\${verrel}.el7"
-   rpm -V "atomic-openshift-utils-\${verrel}.el7"
+   sudo yum install -y "\${oapkg}-\${verrel}.el7"
+   rpm -V "\${oapkg}-\${verrel}.el7"
 fi
 EOF
 scp $runfile openshiftdevel:/tmp
@@ -223,9 +226,11 @@ popd
 cd $OS_ROOT
 jobs_repo=$OS_A_C_J_DIR
 if [[ "\${curbranch}" == master ]] ; then
-   git log -1 --pretty=%h >> "\${jobs_repo}/ORIGIN_COMMIT"
-   ( source hack/lib/init.sh; os::build::rpm::get_nvra_vars; echo "-\${OS_RPM_VERSION}-\${OS_RPM_RELEASE}" ) >> "\${jobs_repo}/ORIGIN_PKG_VERSION"
-   ( source hack/lib/init.sh; os::build::rpm::get_nvra_vars; echo "\${OS_GIT_MAJOR}.\${OS_GIT_MINOR}" | sed "s/+//" ) >> "\${jobs_repo}/ORIGIN_RELEASE"
+    git log -1 --pretty=%h > "\${jobs_repo}/ORIGIN_COMMIT"
+    ( source hack/lib/init.sh; os::build::rpm::get_nvra_vars; echo "-\${OS_RPM_VERSION}-\${OS_RPM_RELEASE}" ) > "\${jobs_repo}/ORIGIN_PKG_VERSION"
+    ( source hack/lib/init.sh; os::build::rpm::get_nvra_vars; echo "\${OS_GIT_MAJOR}.\${OS_GIT_MINOR}" | sed "s/+//" ) > "\${jobs_repo}/ORIGIN_RELEASE"
+    sudo yum -y downgrade skopeo-0.1.27\* skopeo-containers-0.1.27\*
+
 elif [[ "\${curbranch}" =~ ^release-* ]] ; then
     pushd $OS_O_A_L_DIR
     # get repo ver from branch name
@@ -274,15 +279,19 @@ EOF2
         if ( sudo yum install --assumeno origin\${pkgver} 2>&1 || : ) | grep -q 'No package .* available' ; then
             # just ask yum what the heck the version is
             pkgver=\$( ( sudo yum install --assumeno origin 2>&1 || : ) | awk '\$1 == "x86_64" {print \$2}' )
-            echo "-\${pkgver}" > \${jobs_repo}/ORIGIN_PKG_VERSION
+            if [ -n "\${pkgver:-}" ] ; then
+                echo "-\${pkgver}" > \${jobs_repo}/ORIGIN_PKG_VERSION
+            else
+                rm -f \${jobs_repo}/ORIGIN_PKG_VERSION
+            fi
         else
             echo package origin\${pkgver} is available
         fi
     else # use latest on machine
         pushd $OS_ROOT > /dev/null
-        git log -1 --pretty=%h >> "\${jobs_repo}/ORIGIN_COMMIT"
-        ( source hack/lib/init.sh; os::build::rpm::get_nvra_vars; echo "-\${OS_RPM_VERSION}-\${OS_RPM_RELEASE}" ) >> "\${jobs_repo}/ORIGIN_PKG_VERSION"
-        ( source hack/lib/init.sh; os::build::rpm::get_nvra_vars; echo "\${OS_GIT_MAJOR}.\${OS_GIT_MINOR}" | sed "s/+//" ) >> "\${jobs_repo}/ORIGIN_RELEASE"
+        git log -1 --pretty=%h > "\${jobs_repo}/ORIGIN_COMMIT"
+        ( source hack/lib/init.sh; os::build::rpm::get_nvra_vars; echo "-\${OS_RPM_VERSION}-\${OS_RPM_RELEASE}" ) > "\${jobs_repo}/ORIGIN_PKG_VERSION"
+        ( source hack/lib/init.sh; os::build::rpm::get_nvra_vars; echo "\${OS_GIT_MAJOR}.\${OS_GIT_MINOR}" | sed "s/+//" ) > "\${jobs_repo}/ORIGIN_RELEASE"
         popd > /dev/null
     fi
     # build our release deps package
@@ -290,6 +299,10 @@ EOF2
     # downgrade/erase troublesome packages
     sudo yum -y downgrade docker-1.12\* docker-client-1.12\* docker-common-1.12\* docker-rhel-push-plugin-1.12\* skopeo-0.1.27\* skopeo-containers-0.1.27\*
     sudo yum -y install \$HOME/rpmbuild/RPMS/noarch/branch-deps-*.noarch.rpm
+    if [[ "\${curbranch}" == release-3.9 ]] ; then
+        # hack for the CA serial number problem
+        sudo sed -i -e '/- name: Create ca serial/,/^\$/{s/"00"/""/; /when/d}' /usr/share/ansible/openshift-ansible/roles/openshift_ca/tasks/main.yml
+    fi
 else
     echo Error: unknown base branch \$curbranch: please resubmit PR on master or a release-x.y branch
 fi
@@ -321,11 +334,13 @@ cat > $runfile <<EOF
 set -euxo pipefail
 cd $OS_A_C_J_DIR
 if [ -f /usr/share/ansible/openshift-ansible/playbooks/prerequisites.yml ] ; then
-    ansible-playbook -vv --become               \
+    ANSIBLE_LOG_PATH=/tmp/ansible-prereq.log ansible-playbook -vvv --become               \
                         --become-user root         \
                         --connection local         \
                         --inventory sjb/inventory/ \
-                        -e deployment_type=origin  \
+                        -e deployment_type=origin -e debug_level=2 \
+                        -e @sjb/inventory/base.cfg -e skip_sanity_checks=true \
+                        -e 'openshift_disable_check=*' -e openshift_install_examples=false \
                         -e openshift_docker_log_driver=${LOG_DRIVER:-journald} \
                         -e openshift_docker_options="--log-driver=${LOG_DRIVER:-journald}" \
                         /usr/share/ansible/openshift-ansible/playbooks/prerequisites.yml
@@ -337,11 +352,13 @@ if [[ -s "\${playbook_base}/openshift-node/network_manager.yml" ]]; then
 else
     playbook="\${playbook_base}byo/openshift-node/network_manager.yml"
 fi
-ansible-playbook -vvv --become               \
+ANSIBLE_LOG_PATH=/tmp/ansible-network.log ansible-playbook -vvv --become               \
   --become-user root         \
   --connection local         \
   --inventory sjb/inventory/ \
   -e deployment_type=origin  \
+  -e skip_sanity_checks=true -e debug_level=2 \
+  -e 'openshift_disable_check=*' -e openshift_install_examples=false \
   -e openshift_docker_log_driver=${LOG_DRIVER:-journald} \
   -e openshift_docker_options="--log-driver=${LOG_DRIVER:-journald}" \
   \${playbook}
@@ -351,18 +368,36 @@ if [[ -s "\${playbook_base}deploy_cluster.yml" ]]; then
 else
     playbook="\${playbook_base}byo/config.yml"
 fi
-ansible-playbook -vvv --become               \
+
+if [ -s ./ORIGIN_PKG_VERSION ] ; then
+    pkg_ver_flag="-e openshift_pkg_version=\$( cat ./ORIGIN_PKG_VERSION )"
+else
+    pkg_ver_flag=""
+fi
+
+if [ -s ./ORIGIN_RELEASE ] ; then
+    rel_flag="-e openshift_release=\$( cat ./ORIGIN_RELEASE )"
+else
+    rel_flag=""
+fi
+
+ANSIBLE_LOG_PATH=/tmp/ansible-origin.log ansible-playbook -vvv --become               \
   --become-user root         \
   --connection local         \
   --inventory sjb/inventory/ \
-  -e deployment_type=origin  \
+  -e deployment_type=origin -e debug_level=2 \
+  -e openshift_deployment_type=origin  \
+  -e etcd_data_dir="\${ETCD_DATA_DIR}" \
   -e openshift_logging_install_logging=False \
   -e openshift_logging_install_metrics=False \
   -e openshift_docker_log_driver=${LOG_DRIVER:-journald} \
   -e openshift_docker_options="--log-driver=${LOG_DRIVER:-journald}" \
-  -e etcd_data_dir="\${ETCD_DATA_DIR}" \
-  -e openshift_pkg_version="\$( cat ./ORIGIN_PKG_VERSION )"               \
+  \${pkg_ver_flag} \
+  \${rel_flag} \
   -e oreg_url='openshift/origin-\${component}:'"${OPENSHIFT_IMAGE_TAG:-\$( cat ./ORIGIN_COMMIT )}" \
+  -e openshift_node_port_range=30000-32000 \
+  -e 'osm_controller_args={"enable-hostpath-provisioner":["true"]}' -e @sjb/inventory/base.cfg \
+  -e skip_sanity_checks=true -e 'openshift_disable_check=*' -e openshift_install_examples=false \
   \${playbook}
 EOF
 scp $runfile openshiftdevel:/tmp
@@ -425,7 +460,7 @@ elif [[ "\${curbranch}" == master ]]; then
     # force image version/tag to be latest, otherwise it will use openshift_tag_version
     logging_extras="\${logging_extras} -e openshift_logging_image_version=latest"
 fi
-ansible-playbook -vv --become \
+ANSIBLE_LOG_PATH=/tmp/ansible-logging.log ansible-playbook -vvv --become \
   --become-user root \
   --connection local \
   --inventory sjb/inventory/ \
