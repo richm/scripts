@@ -167,6 +167,10 @@ if [[ "\${curbranch}" == release-3.7 || "\${curbranch}" == release-3.6 || "\${cu
 else
     oapkg=openshift-ansible
 fi
+#if [[ "\${curbranch}" == master ]] || [[ "\${curbranch}" == es5.x ]] ; then
+    sudo yum-config-manager --disable origin-deps-rhel7\* || true
+    sudo yum-config-manager --disable rhel-7-server-ose\* || true
+#fi
 cd $OS_O_A_DIR
 jobs_repo=$OS_A_C_J_DIR
 last_tag="\$( git describe --tags --abbrev=0 --exact-match HEAD )"
@@ -225,16 +229,27 @@ curbranch=\$( git rev-parse --abbrev-ref HEAD )
 popd
 cd $OS_ROOT
 jobs_repo=$OS_A_C_J_DIR
-if [[ "\${curbranch}" == master ]] ; then
+if [[ "\${curbranch}" == master ]] || [[ "\${curbranch}" == es5.x ]] ; then
     git log -1 --pretty=%h > "\${jobs_repo}/ORIGIN_COMMIT"
-    ( source hack/lib/init.sh; os::build::rpm::get_nvra_vars; echo "-\${OS_RPM_VERSION}-\${OS_RPM_RELEASE}" ) > "\${jobs_repo}/ORIGIN_PKG_VERSION"
-    ( source hack/lib/init.sh; os::build::rpm::get_nvra_vars; echo "\${OS_GIT_MAJOR}.\${OS_GIT_MINOR}" | sed "s/+//" ) > "\${jobs_repo}/ORIGIN_RELEASE"
-    sudo yum -y downgrade skopeo-0.1.27\* skopeo-containers-0.1.27\*
+    (
+        source hack/lib/init.sh
+        os::build::rpm::get_nvra_vars
+        echo "-\${OS_RPM_VERSION}-\${OS_RPM_RELEASE}" > "\${jobs_repo}/ORIGIN_PKG_VERSION"
+        echo "\${OS_GIT_MAJOR}.\${OS_GIT_MINOR}" | sed "s/+//" > "\${jobs_repo}/ORIGIN_RELEASE"
+        echo "\${OS_RPM_VERSION}" | cut -d'.' -f2 > "\${jobs_repo}/ORIGIN_PKG_MINOR_VERSION"
+        tag="\$( echo "v\${OS_GIT_MAJOR}.\${OS_GIT_MINOR}" | sed "s/+//" )"
+        echo "\${tag}" > "\${jobs_repo}/ORIGIN_TAG"
 
+    )
+    cp \${jobs_repo}/ORIGIN_COMMIT \${jobs_repo}/ORIGIN_IMAGE_TAG
+    sudo yum-config-manager --disable origin-deps-rhel7\* || true
+    sudo yum-config-manager --disable rhel-7-server-ose\* || true
+    #sudo yum -y downgrade skopeo-0.1.27\* skopeo-containers-0.1.27\*
 elif [[ "\${curbranch}" =~ ^release-* ]] ; then
     pushd $OS_O_A_L_DIR
     # get repo ver from branch name
-    repover=\$( echo "\${curbranch}" | sed -e 's/release-//' -e 's/[.]//' )
+    origin_release=\$( echo "\${curbranch}" | sed -e 's/release-//' )
+    repover=\$( echo "\${origin_release}" | sed -e 's/[.]//' )
     # get version from tag
     closest_tag=\$( git describe --tags --abbrev=0 )
     # pkg ver is commitver with leading "-" instead of "v"
@@ -275,6 +290,8 @@ EOF2
     if [[ "\${foundrepover:-false}" == true ]] ; then
         echo "\${closest_tag}" > \${jobs_repo}/ORIGIN_COMMIT
         echo "\${pkgver}" > \${jobs_repo}/ORIGIN_PKG_VERSION
+        echo "\${origin_release}" > \${jobs_repo}/ORIGIN_RELEASE
+        echo "v\${origin_release}" > \${jobs_repo}/ORIGIN_IMAGE_TAG
         sudo yum-config-manager --disable origin-local-release > /dev/null
         if ( sudo yum install --assumeno origin\${pkgver} 2>&1 || : ) | grep -q 'No package .* available' ; then
             # just ask yum what the heck the version is
@@ -290,8 +307,17 @@ EOF2
     else # use latest on machine
         pushd $OS_ROOT > /dev/null
         git log -1 --pretty=%h > "\${jobs_repo}/ORIGIN_COMMIT"
-        ( source hack/lib/init.sh; os::build::rpm::get_nvra_vars; echo "-\${OS_RPM_VERSION}-\${OS_RPM_RELEASE}" ) > "\${jobs_repo}/ORIGIN_PKG_VERSION"
-        ( source hack/lib/init.sh; os::build::rpm::get_nvra_vars; echo "\${OS_GIT_MAJOR}.\${OS_GIT_MINOR}" | sed "s/+//" ) > "\${jobs_repo}/ORIGIN_RELEASE"
+        (
+            source hack/lib/init.sh
+            os::build::rpm::get_nvra_vars
+            echo "-\${OS_RPM_VERSION}-\${OS_RPM_RELEASE}" > "\${jobs_repo}/ORIGIN_PKG_VERSION"
+            echo "\${OS_GIT_MAJOR}.\${OS_GIT_MINOR}" | sed "s/+//" > "\${jobs_repo}/ORIGIN_RELEASE"
+            echo "\${OS_RPM_VERSION}" | cut -d'.' -f2 > "\${jobs_repo}/ORIGIN_PKG_MINOR_VERSION"
+            tag="\$( echo "v\${OS_GIT_MAJOR}.\${OS_GIT_MINOR}" | sed "s/+//" )"
+            echo "\${tag}" > "\${jobs_repo}/ORIGIN_TAG"
+
+        )
+        cp \${jobs_repo}/ORIGIN_COMMIT \${jobs_repo}/ORIGIN_IMAGE_TAG
         popd > /dev/null
     fi
     # build our release deps package
@@ -299,10 +325,10 @@ EOF2
     # downgrade/erase troublesome packages
     sudo yum -y downgrade docker-1.12\* docker-client-1.12\* docker-common-1.12\* docker-rhel-push-plugin-1.12\* skopeo-0.1.27\* skopeo-containers-0.1.27\*
     sudo yum -y install \$HOME/rpmbuild/RPMS/noarch/branch-deps-*.noarch.rpm
-    if [[ "\${curbranch}" == release-3.9 ]] ; then
-        # hack for the CA serial number problem
-        sudo sed -i -e '/- name: Create ca serial/,/^\$/{s/"00"/""/; /when/d}' /usr/share/ansible/openshift-ansible/roles/openshift_ca/tasks/main.yml
-    fi
+    # if [[ "\${curbranch}" == release-3.9 ]] ; then
+    #     # hack for the CA serial number problem
+    #     sudo sed -i -e '/- name: Create ca serial/,/^\$/{s/"00"/""/; /when/d}' /usr/share/ansible/openshift-ansible/roles/openshift_ca/tasks/main.yml
+    # fi
 else
     echo Error: unknown base branch \$curbranch: please resubmit PR on master or a release-x.y branch
 fi
@@ -333,6 +359,17 @@ ssh -n openshiftdevel "bash $runfile"
 cat > $runfile <<EOF
 set -euxo pipefail
 cd $OS_A_C_J_DIR
+# richm 20180531 - openshift/origin-service-catalog:a861408 not found
+# for some reason, the service-catalog image is not available
+# docker images|grep service-catalog is empty
+# so, pull the latest and tag it with ${OPENSHIFT_IMAGE_TAG:-\$( cat ./ORIGIN_IMAGE_TAG )}
+scname=\$( docker images | awk '/service-catalog/ {print \$1}' )
+if [ -z "\${scname:-}" ] ; then
+    docker pull openshift/origin-service-catalog
+fi
+imgtag="${OPENSHIFT_IMAGE_TAG:-\$( cat ./ORIGIN_IMAGE_TAG )}"
+docker tag openshift/origin-service-catalog:latest openshift/origin-service-catalog:\$imgtag
+
 if [ -f /usr/share/ansible/openshift-ansible/playbooks/prerequisites.yml ] ; then
     ANSIBLE_LOG_PATH=/tmp/ansible-prereq.log ansible-playbook -vvv --become               \
                         --become-user root         \
@@ -343,6 +380,9 @@ if [ -f /usr/share/ansible/openshift-ansible/playbooks/prerequisites.yml ] ; the
                         -e 'openshift_disable_check=*' -e openshift_install_examples=false \
                         -e openshift_docker_log_driver=${LOG_DRIVER:-journald} \
                         -e openshift_docker_options="--log-driver=${LOG_DRIVER:-journald}" \
+                        -e openshift_pkg_version="\$( cat ./ORIGIN_PKG_VERSION )"               \
+                        -e openshift_release="\$( cat ./ORIGIN_RELEASE )"                       \
+                        -e oreg_url='openshift/origin-\${component}:'"${OPENSHIFT_IMAGE_TAG:-\$( cat ./ORIGIN_IMAGE_TAG )}" \
                         /usr/share/ansible/openshift-ansible/playbooks/prerequisites.yml
 fi
 
@@ -361,24 +401,15 @@ ANSIBLE_LOG_PATH=/tmp/ansible-network.log ansible-playbook -vvv --become        
   -e 'openshift_disable_check=*' -e openshift_install_examples=false \
   -e openshift_docker_log_driver=${LOG_DRIVER:-journald} \
   -e openshift_docker_options="--log-driver=${LOG_DRIVER:-journald}" \
+  -e openshift_pkg_version="\$( cat ./ORIGIN_PKG_VERSION )"               \
+  -e openshift_release="\$( cat ./ORIGIN_RELEASE )"                       \
+  -e oreg_url='openshift/origin-\${component}:'"${OPENSHIFT_IMAGE_TAG:-\$( cat ./ORIGIN_IMAGE_TAG )}" \
   \${playbook}
 
 if [[ -s "\${playbook_base}deploy_cluster.yml" ]]; then
     playbook="\${playbook_base}deploy_cluster.yml"
 else
     playbook="\${playbook_base}byo/config.yml"
-fi
-
-if [ -s ./ORIGIN_PKG_VERSION ] ; then
-    pkg_ver_flag="-e openshift_pkg_version=\$( cat ./ORIGIN_PKG_VERSION )"
-else
-    pkg_ver_flag=""
-fi
-
-if [ -s ./ORIGIN_RELEASE ] ; then
-    rel_flag="-e openshift_release=\$( cat ./ORIGIN_RELEASE )"
-else
-    rel_flag=""
 fi
 
 ANSIBLE_LOG_PATH=/tmp/ansible-origin.log ansible-playbook -vvv --become               \
@@ -392,9 +423,9 @@ ANSIBLE_LOG_PATH=/tmp/ansible-origin.log ansible-playbook -vvv --become         
   -e openshift_logging_install_metrics=False \
   -e openshift_docker_log_driver=${LOG_DRIVER:-journald} \
   -e openshift_docker_options="--log-driver=${LOG_DRIVER:-journald}" \
-  \${pkg_ver_flag} \
-  \${rel_flag} \
-  -e oreg_url='openshift/origin-\${component}:'"${OPENSHIFT_IMAGE_TAG:-\$( cat ./ORIGIN_COMMIT )}" \
+  -e openshift_pkg_version="\$( cat ./ORIGIN_PKG_VERSION )"               \
+  -e openshift_release="\$( cat ./ORIGIN_RELEASE )"                       \
+  -e oreg_url='openshift/origin-\${component}:'"${OPENSHIFT_IMAGE_TAG:-\$( cat ./ORIGIN_IMAGE_TAG )}" \
   -e openshift_node_port_range=30000-32000 \
   -e 'osm_controller_args={"enable-hostpath-provisioner":["true"]}' -e @sjb/inventory/base.cfg \
   -e skip_sanity_checks=true -e 'openshift_disable_check=*' -e openshift_install_examples=false \
@@ -450,15 +481,19 @@ else
     playbook="\${playbook_base}byo/openshift-cluster/openshift-logging.yml"
 fi
 pushd "$OS_O_A_L_DIR"
+release_commit=${OPENSHIFT_IMAGE_TAG:-}
+if [ -z "\${release_commit:-}" ] ; then
+    release_commit=\$( git log -1 --pretty=%h )
+fi
 curbranch=\$( git rev-parse --abbrev-ref HEAD )
 popd
 logging_extras=""
 if [[ "\$curbranch" == es5.x ]]; then
-    logging_extras="\${logging_extras} -e openshift_logging_es5_techpreview=True \
-                    -e openshift_logging_image_version=latest"
-elif [[ "\${curbranch}" == master ]]; then
-    # force image version/tag to be latest, otherwise it will use openshift_tag_version
-    logging_extras="\${logging_extras} -e openshift_logging_image_version=latest"
+    logging_extras="\${logging_extras} -e openshift_logging_es5_techpreview=True"
+#                    -e openshift_logging_image_version=latest"
+#elif [[ "\${curbranch}" == master ]]; then
+#    # force image version/tag to be latest, otherwise it will use openshift_tag_version
+#    logging_extras="\${logging_extras} -e openshift_logging_image_version=latest"
 fi
 ANSIBLE_LOG_PATH=/tmp/ansible-logging.log ansible-playbook -vvv --become \
   --become-user root \
@@ -478,6 +513,8 @@ ANSIBLE_LOG_PATH=/tmp/ansible-logging.log ansible-playbook -vvv --become \
   -e openshift_logging_mux_allow_external=${MUX_ALLOW_EXTERNAL:-True} \
   -e openshift_logging_es_allow_external=${ES_ALLOW_EXTERNAL:-True} \
   -e openshift_logging_es_ops_allow_external=${ES_OPS_ALLOW_EXTERNAL:-True} \
+  -e oreg_url='openshift/origin-\${component}:'"\${release_commit}" \
+  -e openshift_logging_elasticsearch_proxy_image=openshift/oauth-proxy:v1.0.0 \
   ${EXTRA_ANSIBLE:-} \${logging_extras} \
   \${playbook} \
   --skip-tags=update_master_config
